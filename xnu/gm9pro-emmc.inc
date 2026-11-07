@@ -1,6 +1,6 @@
-/* Read-only BSD disk front end for the GM9 Pro's inherited SDCC state.
+/* BSD disk front end for the GM9 Pro's inherited SDCC state.
  * Appended to the hardware-tested PIO reader by prepare-gm9pro.py.
- * No card initialization, partition switching or write commands are used.
+ * Experimental writes require gm9rw=1 and are limited to userdata.
  */
 #include <sys/param.h>
 #include <sys/buf.h>
@@ -22,6 +22,8 @@ static struct gm9_partition {
 static unsigned gm9_part_count;
 static int gm9_bmajor = -1, gm9_cmajor = -1;
 static bool gm9_ready, gm9_failed;
+static bool gm9_write_enabled, gm9_write_failed, gm9_write_safe;
+static unsigned gm9_userdata;
 static LCK_GRP_DECLARE(gm9_emmc_group, "gm9_emmc");
 static LCK_MTX_DECLARE(gm9_emmc_lock, &gm9_emmc_group);
 
@@ -64,6 +66,7 @@ gm9_read_gpt(void)
     __asm__ volatile("dsb sy" ::: "memory");
     if (read32(EMMC + 0x250) != fifo) return EIO;
     if (read_block(8, 0, ext)) return EIO;
+    gm9_write_safe = ext[33] == 0 && ext[15] == 0 && ext[171] == 0;
     uint64_t sectors = le32(ext + 212);
     if (ext[192] < 5 || ext[192] > 8 || ext[61] ||
         (ext[179] & 7) || sectors <= 0x400000) return ENXIO;
@@ -127,6 +130,14 @@ gm9_read_gpt(void)
         return EINVAL;
     }
     gm9_part_count = entries;
+    unsigned userdata_count = 0;
+    for (unsigned i = 1; i <= entries; i++) {
+        if (gm9_parts[i].sectors && !strcmp(gm9_parts[i].name, "userdata")) {
+            gm9_userdata = i;
+            userdata_count++;
+        }
+    }
+    if (userdata_count != 1) gm9_userdata = 0;
     printf("GM9 eMMC: GPT header and entry-array CRC verified; %llu sectors\n", sectors);
     return 0;
 }
@@ -135,7 +146,8 @@ static int
 gm9_open(dev_t dev, int flags, __unused int type, __unused struct proc *p)
 {
     if (!gm9_partition(dev)) return ENXIO;
-    return flags & FWRITE ? EROFS : 0;
+    return (flags & FWRITE) && (!gm9_write_enabled || gm9_write_failed ||
+        minor(dev) != gm9_userdata) ? EROFS : 0;
 }
 
 static int
@@ -154,8 +166,10 @@ gm9_strategy(buf_t bp)
     struct gm9_partition *part = gm9_partition(buf_device(bp));
     daddr64_t block = buf_blkno(bp);
     buf_setresid(bp, count);
-    if (!(buf_flags(bp) & B_READ)) { error = EROFS; goto done; }
+    bool writing = !(buf_flags(bp) & B_READ);
     if (!part) { error = ENXIO; goto done; }
+    if (writing && (!gm9_write_enabled || gm9_write_failed ||
+        minor(buf_device(bp)) != gm9_userdata)) { error = EROFS; goto done; }
     if (block < 0 || count % 512 || (uint64_t)block > part->sectors ||
         count / 512 > part->sectors - (uint64_t)block) {
         error = EINVAL; goto done;
@@ -165,7 +179,11 @@ gm9_strategy(buf_t bp)
     lck_mtx_lock(&gm9_emmc_lock);
     while (completed < count) {
         uint64_t lba = part->first + (uint64_t)block + completed / 512;
-        if (read_block(17, (uint32_t)lba, (uint8_t *)address + completed)) {
+        int sent = 0;
+        if ((writing && (gm9_write_failed || wp_write_one((uint32_t)lba,
+                (uint8_t *)address + completed, &sent))) ||
+            (!writing && read_block(17, (uint32_t)lba, (uint8_t *)address + completed))) {
+            if (writing) gm9_write_failed = true;
             error = EIO; break;
         }
         completed += 512;
@@ -189,9 +207,11 @@ gm9_ioctl(dev_t dev, u_long command, caddr_t data, __unused int flag,
     case DKIOCGETPHYSICALBLOCKSIZE: *(uint32_t *)data = 512; return 0;
     case DKIOCSETBLOCKSIZE: return *(uint32_t *)data == 512 ? 0 : EINVAL;
     case DKIOCGETBLOCKCOUNT: *(uint64_t *)data = part->sectors; return 0;
-    case DKIOCISWRITABLE: *(uint32_t *)data = 0; return 0;
+    case DKIOCISWRITABLE: *(uint32_t *)data = gm9_write_enabled &&
+        !gm9_write_failed && minor(dev) == gm9_userdata; return 0;
     case DKIOCGETMAXBLOCKCOUNTREAD: *(uint64_t *)data = 128; return 0;
-    case DKIOCGETMAXBLOCKCOUNTWRITE: *(uint64_t *)data = 0; return 0;
+    case DKIOCGETMAXBLOCKCOUNTWRITE: *(uint64_t *)data = gm9_write_enabled &&
+        !gm9_write_failed && minor(dev) == gm9_userdata ? 1 : 0; return 0;
     default: return ENOTTY;
     }
 }
@@ -210,9 +230,12 @@ gm9_read(dev_t dev, struct uio *uio, __unused int flags)
 }
 
 static int
-gm9_write(__unused dev_t dev, __unused struct uio *uio, __unused int flags)
+gm9_write(dev_t dev, struct uio *uio, __unused int flags)
 {
-    return EROFS;
+    if (!gm9_partition(dev)) return ENXIO;
+    if (!gm9_write_enabled || gm9_write_failed || minor(dev) != gm9_userdata)
+        return EROFS;
+    return physio(gm9_strategy, NULL, dev, B_WRITE, minphys, uio, 512);
 }
 
 static const struct bdevsw gm9_bdevsw = {
@@ -238,6 +261,11 @@ gm9_disk_init(void)
     gm9_quiet = true;
     int error = gm9_read_gpt();
     if (error) return error;
+    unsigned int requested = 0;
+    gm9_write_enabled = PE_parse_boot_argn("gm9rw", &requested, sizeof(requested)) &&
+        requested == 1 && gm9_write_safe && gm9_userdata;
+    printf("GM9 eMMC: userdata writes %s (cache/CMDQ/WP safe=%d)\n",
+        gm9_write_enabled ? "enabled" : "disabled", gm9_write_safe);
     gm9_bmajor = bdevsw_add(-1, &gm9_bdevsw);
     if (gm9_bmajor < 0) return ENXIO;
     gm9_cmajor = cdevsw_add_with_bdev(-1, &gm9_cdevsw, gm9_bmajor);
@@ -251,13 +279,15 @@ gm9_disk_init(void)
         char name[24];
         if (i) snprintf(name, sizeof(name), "emmc0s%u", i);
         else strlcpy(name, "emmc0", sizeof(name));
+        int mode = gm9_write_enabled && i == gm9_userdata ? 0640 : 0440;
         if (!devfs_make_node(makedev(gm9_bmajor, i), DEVFS_BLOCK,
-            UID_ROOT, GID_OPERATOR, 0440, "%s", name) ||
+            UID_ROOT, GID_OPERATOR, mode, "%s", name) ||
             !devfs_make_node(makedev(gm9_cmajor, i), DEVFS_CHAR,
-            UID_ROOT, GID_OPERATOR, 0440, "r%s", name))
+            UID_ROOT, GID_OPERATOR, mode, "r%s", name))
             panic("GM9 eMMC: devfs node creation failed for %s", name);
-        printf("GM9 eMMC: %s %s first=%llu sectors=%llu read-only\n",
-            name, gm9_parts[i].name, gm9_parts[i].first, gm9_parts[i].sectors);
+        printf("GM9 eMMC: %s %s first=%llu sectors=%llu %s\n",
+            name, gm9_parts[i].name, gm9_parts[i].first, gm9_parts[i].sectors,
+            mode == 0640 ? "writable" : "read-only");
     }
     gm9_ready = true;
     return 0;

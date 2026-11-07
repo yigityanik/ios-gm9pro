@@ -190,8 +190,10 @@ void gm9pro_emmc_selftest(void)
     panic("GM9 eMMC diagnostic finished; root driver not installed yet");
 }
 '''
+write_probe = (repo / 'shim/gm9pro-write-probe.inc').read_text()
+writer = write_probe[write_probe.index('/* RCA 2 responded'):write_probe.index('static int wp_userdata_name')]
 (source / 'bsd/dev/gm9pro_emmc.c').write_text(
-    preamble + reader + tail + (repo / 'xnu/gm9pro-emmc.inc').read_text())
+    preamble + reader + writer + tail + (repo / 'xnu/gm9pro-emmc.inc').read_text())
 update('bsd/conf/files', lambda s: s + '\nbsd/dev/gm9pro_emmc.c\t\tstandard\n')
 
 def root(s):

@@ -22,6 +22,10 @@ case "${GM9PRO_BOOT_MODE:-ram}" in
         [[ "$part" =~ ^[A-Za-z0-9_]+$ ]] || { echo 'Invalid root partition name' >&2; exit 1; }
         args=()
         cmdline="debug=0x14e serial=3 cpus=1 keepsyms=1 -noprogress rd=emmcroot0 emmcroot=$part unentitled_ios_sim_launch=1 ignition_level=1"
+        if [[ "${GM9PRO_ENABLE_WRITES:-0}" == 1 ]]; then
+            [[ "$part" == userdata ]] || { echo 'Writes are limited to userdata' >&2; exit 1; }
+            cmdline+=" gm9rw=1"
+        fi
         ;;
     *) echo 'GM9PRO_BOOT_MODE must be ram or emmc' >&2; exit 1 ;;
 esac
