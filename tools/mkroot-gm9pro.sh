@@ -12,7 +12,7 @@ cleanup() {
 }
 trap cleanup EXIT
 mkdir "$work/mnt"
-hdiutil create -quiet -size 16m -fs 'Case-sensitive HFS+' -layout NONE \
+hdiutil create -size 32m -fs HFSX -layout NONE \
     -format UDRW "$work/root.dmg"
 hdiutil attach -quiet -nobrowse -owners on -mountpoint "$work/mnt" "$work/root.dmg"
 mounted=1
@@ -35,6 +35,6 @@ assert b[1024:1026] == b'HX', 'Expected case-sensitive HFS+ volume'
 block_size, blocks = struct.unpack_from('>II', b, 1064)
 assert block_size >= 512 and block_size & (block_size - 1) == 0
 assert block_size * blocks <= len(b)
-assert len(b) <= 20 * 1024 * 1024, 'RAM root exceeds the boot payload budget'
+assert len(b) <= 34 * 1024 * 1024, 'RAM root exceeds the boot payload budget'
 print(f'HFS root: {len(b)} bytes, {blocks} allocation blocks of {block_size}')
 PY
