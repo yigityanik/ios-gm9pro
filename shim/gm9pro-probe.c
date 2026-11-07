@@ -1,6 +1,6 @@
 /* SDM660 entry probe. UART must already be configured by ABL.
  * Addresses and CPU affinities come from the GM9 Pro stock device tree.
- * No storage commands or partition writes are issued.
+ * Only EXT_CSD and single-block reads are issued to storage.
  */
 #include <stdint.h>
 #define UART 0x0c170000UL
@@ -8,8 +8,10 @@
 #define RSR(r) ({ uint64_t v; __asm__ volatile("mrs %0, " r : "=r"(v)); v; })
 extern void secondary_entry(void);
 static volatile struct { uint64_t midr, mmfr0, mpidr, ready; } cpu[8];
+static volatile uint64_t run_big;
 static uint32_t read32(uintptr_t a) { return *(volatile uint32_t *)a; }
 static void write32(uintptr_t a, uint32_t v) { *(volatile uint32_t *)a = v; }
+static void write16(uintptr_t a, uint16_t v) { *(volatile uint16_t *)a = v; }
 static uint64_t ticks(void) { return RSR("cntpct_el0"); }
 static uint64_t freq(void) { return RSR("cntfrq_el0"); }
 static void putc_uart(char c)
@@ -32,6 +34,125 @@ static void hex(const char *name, uint64_t value)
         putc_uart("0123456789abcdef"[(value >> i) & 15]);
     puts_uart("\n");
 }
+/* Reuse ABL's selected card, voltage, clock, DLL and bus-width setup.
+ * Poll the SDHCI PIO path; do not reinitialize the card or select a partition.
+ */
+static int wait_status(uint32_t wanted)
+{
+    uint64_t end = ticks() + 2 * freq();
+    do {
+        uint32_t status = read32(EMMC + 0x30);
+        if (status & 0xffff8000U) {
+            hex("SDHCI error status", status);
+            return -1;
+        }
+        if ((status & wanted) == wanted) return 0;
+    } while (ticks() < end);
+    hex("SDHCI timeout waiting", wanted);
+    hex("SDHCI status", read32(EMMC + 0x30));
+    hex("SDHCI present", read32(EMMC + 0x24));
+    return -1;
+}
+static int read_block(unsigned cmd, uint32_t arg, uint8_t *out)
+{
+    /* Keep this interface incapable of issuing write/erase/switch commands. */
+    if (cmd != 8 && cmd != 17) return -1;
+    uint64_t end = ticks() + freq();
+    while (read32(EMMC + 0x24) & 3) {
+        if (ticks() >= end) { puts_uart("SDHCI busy before command\n"); return -1; }
+    }
+    uint32_t old_enable = read32(EMMC + 0x34);
+    uint32_t old_signal = read32(EMMC + 0x38);
+    write32(EMMC + 0x38, 0);
+    write32(EMMC + 0x34, old_enable | 0xffff8033U);
+    write32(EMMC + 0x30, 0xffffffffU);
+    write16(EMMC + 0x04, 512);
+    write16(EMMC + 0x06, 1);
+    write32(EMMC + 0x08, arg);
+    write16(EMMC + 0x0c, 0x10); /* one block, read, PIO */
+    __asm__ volatile("dsb sy" ::: "memory");
+    write16(EMMC + 0x0e, (cmd << 8) | 0x3a); /* R1, CRC, index, data */
+    int rc = -1;
+    if (wait_status(1)) goto done;
+    uint32_t r1 = read32(EMMC + 0x10);
+    hex("eMMC R1", r1);
+    if (r1 & 0xffffe080U) { puts_uart("eMMC rejected command\n"); goto done; }
+    write32(EMMC + 0x30, 1);
+    if (wait_status(0x20)) goto done;
+    if (!(read32(EMMC + 0x24) & 0x800)) {
+        puts_uart("SDHCI FIFO not readable\n"); goto done;
+    }
+    for (unsigned i = 0; i < 512; i += 4) {
+        uint32_t v = read32(EMMC + 0x20);
+        out[i] = v; out[i + 1] = v >> 8;
+        out[i + 2] = v >> 16; out[i + 3] = v >> 24;
+    }
+    write32(EMMC + 0x30, 0x20);
+    if (wait_status(2)) goto done;
+    write32(EMMC + 0x30, 2);
+    rc = 0;
+done:
+    write32(EMMC + 0x34, old_enable);
+    write32(EMMC + 0x38, old_signal);
+    return rc;
+}
+static uint32_t le32(const uint8_t *p)
+{
+    return (uint32_t)p[0] | (uint32_t)p[1] << 8 |
+           (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+static uint32_t crc32(const uint8_t *p, unsigned len)
+{
+    uint32_t c = ~0U;
+    while (len--) {
+        c ^= *p++;
+        for (unsigned bit = 0; bit < 8; bit++)
+            c = (c >> 1) ^ (0xedb88320U & (0U - (c & 1)));
+    }
+    return ~c;
+}
+static void emmc_probe(void)
+{
+    uint8_t ext[512], sector[512], again[512];
+    puts_uart("eMMC CMD8 EXT_CSD\n");
+    if (read_block(8, 0, ext)) return;
+    hex("EXT_CSD revision", ext[192]);
+    hex("EXT_CSD partition config", ext[179]);
+    hex("EXT_CSD bus width", ext[183]);
+    hex("EXT_CSD HS timing", ext[185]);
+    uint32_t count = le32(ext + 212);
+    hex("eMMC sectors", count);
+    if (ext[192] < 5 || ext[192] > 8 || count <= 0x400000 ||
+        ext[61] != 0 || (ext[179] & 7)) {
+        puts_uart("Unsupported EXT_CSD or non-user partition; stopping\n"); return;
+    }
+    puts_uart("eMMC CMD17 LBA 0\n");
+    if (read_block(17, 0, sector)) return;
+    if (sector[510] != 0x55 || sector[511] != 0xaa) {
+        puts_uart("MBR signature missing\n"); return;
+    }
+    puts_uart("MBR signature OK; eMMC CMD17 LBA 1\n");
+    if (read_block(17, 1, sector)) return;
+    const char magic[] = "EFI PART";
+    for (unsigned i = 0; i < 8; i++)
+        if (sector[i] != (uint8_t)magic[i]) { puts_uart("GPT signature missing\n"); return; }
+    uint32_t size = le32(sector + 12), expected = le32(sector + 16);
+    if (size < 92 || size > 512 || le32(sector + 24) != 1 || le32(sector + 28)) {
+        puts_uart("Invalid GPT header\n"); return;
+    }
+    for (unsigned i = 16; i < 20; i++) sector[i] = 0;
+    uint32_t actual = crc32(sector, size);
+    hex("GPT header CRC expected", expected);
+    hex("GPT header CRC actual", actual);
+    if (actual != expected) { puts_uart("GPT header CRC mismatch\n"); return; }
+    puts_uart("Repeat LBA 1 read\n");
+    if (read_block(17, 1, again)) return;
+    for (unsigned i = 16; i < 20; i++) sector[i] = again[i];
+    if (le32(again + 16) != expected) { puts_uart("GPT CRC changed\n"); return; }
+    for (unsigned i = 0; i < 512; i++)
+        if (sector[i] != again[i]) { puts_uart("Repeated sector read differs\n"); return; }
+    puts_uart("EMMC READ PASS: MBR, GPT header CRC and repeat read verified\n");
+}
 static int64_t cpu_on(uint64_t target, uint64_t idx)
 {
     register uint64_t x0 __asm__("x0") = 0xc4000003;
@@ -49,10 +170,20 @@ void secondary_main(uint64_t idx)
     cpu[idx].mpidr = RSR("mpidr_el1");
     __asm__ volatile("dsb sy" ::: "memory");
     cpu[idx].ready = 1;
+    if (idx == 4) {
+        while (!run_big) __asm__ volatile("yield");
+        __asm__ volatile("dsb sy" ::: "memory");
+        puts_uart("BIG CORE HANDOFF\n");
+        hex("executing MPIDR", RSR("mpidr_el1"));
+        hex("executing TGran16", (RSR("id_aa64mmfr0_el1") >> 20) & 15);
+        emmc_probe();
+        puts_uart("PROBE 2 COMPLETE; waiting for hardware reset\n");
+        for (;;) __asm__ volatile("wfe");
+    }
 }
 void shim_main(uint64_t dtb)
 {
-    puts_uart("\nGM9PRO SHIM PROBE 1\n");
+    puts_uart("\nGM9PRO SHIM PROBE 2\n");
     hex("CurrentEL", RSR("CurrentEL"));
     hex("DTB", dtb);
     hex("SCTLR_EL1", RSR("sctlr_el1"));
@@ -81,7 +212,13 @@ void shim_main(uint64_t dtb)
     hex("SDHCI capabilities", read32(EMMC + 0x40));
     hex("SDHCI clock/timeout/reset", read32(EMMC + 0x2c));
     hex("SDHCI host version", *(volatile uint16_t *)(EMMC + 0xfe));
-    puts_uart("PROBE COMPLETE; waiting for hardware reset\n");
+    if (!cpu[4].ready || ((cpu[4].mmfr0 >> 20) & 15) == 0) {
+        puts_uart("Big CPU unavailable; stopping\n");
+        for (;;) __asm__ volatile("wfe");
+    }
+    puts_uart("Releasing big CPU 0x100; parking boot CPU\n");
+    run_big = 1;
+    __asm__ volatile("dsb sy; sev" ::: "memory");
     for (;;) __asm__ volatile("wfe");
 }
 void exc_handler(uint64_t slot, uint64_t *regs)
