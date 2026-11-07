@@ -26,6 +26,9 @@ case "${GM9PRO_BOOT_MODE:-ram}" in
             [[ "$part" == userdata ]] || { echo 'Writes are limited to userdata' >&2; exit 1; }
             cmdline+=" gm9rw=1"
         fi
+        if [[ "${GM9PRO_UNSECURE_LAUNCHD_CACHE:-0}" == 1 ]]; then
+            cmdline+=" launchd_unsecure_cache=1"
+        fi
         ;;
     *) echo 'GM9PRO_BOOT_MODE must be ram or emmc' >&2; exit 1 ;;
 esac
