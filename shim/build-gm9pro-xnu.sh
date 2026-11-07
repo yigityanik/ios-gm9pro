@@ -15,6 +15,16 @@ if [[ -f "$init" ]]; then
     args+=(--ramdisk "$init")
     cmdline='debug=0x14e serial=3 cpus=1 keepsyms=1 -noprogress gm9emmc=0 rd=md0'
 fi
+case "${GM9PRO_BOOT_MODE:-ram}" in
+    ram) ;;
+    emmc)
+        part=${GM9PRO_ROOT_PARTITION:-userdata}
+        [[ "$part" =~ ^[A-Za-z0-9_]+$ ]] || { echo 'Invalid root partition name' >&2; exit 1; }
+        args=()
+        cmdline="debug=0x14e serial=3 cpus=1 keepsyms=1 -noprogress rd=emmcroot0 emmcroot=$part unentitled_ios_sim_launch=1 ignition_level=1"
+        ;;
+    *) echo 'GM9PRO_BOOT_MODE must be ram or emmc' >&2; exit 1 ;;
+esac
 python3 ../tools/mkpayload.py "$kernel" out/gm9pro-xnu/gm9pro.adt out/gm9pro-xnu/payload \
     --cmdline "$cmdline" "${args[@]}"
 cc=${CROSS_COMPILE:-aarch64-linux-gnu-}

@@ -215,7 +215,7 @@ def root(s):
         int error = gm9pro_emmc_rootdev(root);
         if (error) panic("IOFindBSDRoot: eMMC root unavailable: %d", error);
         OSSafeReleaseNULL(matching);
-        strlcpy(rootName, "emmcroot0", rootNameSize);
+        snprintf(rootName, rootNameSize, "emmc0s%u", minor(*root));
         *oflags = 0;
         goto iofrootx;
     }
