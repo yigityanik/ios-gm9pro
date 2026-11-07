@@ -5,6 +5,7 @@ on:
     paths:
       - xnu/**
       - tools/prepare-gm9pro.py
+      - tools/prepare-gm9pro-display.py
       - tools/mkadt-gm9pro.py
       - tools/mkroot-gm9pro.sh
       - tools/gm9pro-init.S
@@ -67,6 +68,8 @@ jobs:
                         'ARCHS="arm64" VALID_ARCHS="arm64"')
           assert s.count('    patches\n') == 1
           s = s.replace('    patches\n', '    patches\n    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro.py" "$WORK_DIR/xnu"\n')
+          s = s.replace('    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro.py" "$WORK_DIR/xnu"\n',
+                        '    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro.py" "$WORK_DIR/xnu"\n    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro-display.py" "$WORK_DIR/xnu"\n')
           # Do not package a kernel after an unapplied device patch.
           s = s.replace('                warning "Skipping patch ${PATCH}',
                         '                if [[ "$(basename "$PATCH")" == 0[0-9][0-9][0-9]-* ]]; then echo "Device patch failed: $PATCH" >&2; exit 1; fi\n                warning "Skipping patch ${PATCH}')
