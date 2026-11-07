@@ -12,6 +12,7 @@ static volatile uint64_t run_big;
 static uint32_t read32(uintptr_t a) { return *(volatile uint32_t *)a; }
 static void write32(uintptr_t a, uint32_t v) { *(volatile uint32_t *)a = v; }
 static void write16(uintptr_t a, uint16_t v) { *(volatile uint16_t *)a = v; }
+static void write8(uintptr_t a, uint8_t v) { *(volatile uint8_t *)a = v; }
 static uint64_t ticks(void) { return RSR("cntpct_el0"); }
 static uint64_t freq(void) { return RSR("cntfrq_el0"); }
 static void putc_uart(char c)
@@ -63,6 +64,13 @@ static int read_block(unsigned cmd, uint32_t arg, uint8_t *out)
     }
     uint32_t old_enable = read32(EMMC + 0x34);
     uint32_t old_signal = read32(EMMC + 0x38);
+    uint8_t old_control = *(volatile uint8_t *)(EMMC + 0x28);
+    /* Match Linux sdhci_config_dma(): ADMA selection can break PIO even
+     * when the transfer-mode DMA-enable bit is clear. Preserve bus width
+     * and the neighboring power-control byte.
+     */
+    write8(EMMC + 0x28, old_control & ~0x18U);
+    __asm__ volatile("dsb sy" ::: "memory");
     write32(EMMC + 0x38, 0);
     write32(EMMC + 0x34, old_enable | 0xffff8033U);
     write32(EMMC + 0x30, 0xffffffffU);
@@ -79,6 +87,7 @@ static int read_block(unsigned cmd, uint32_t arg, uint8_t *out)
         puts_uart("Block configuration mismatch; command not sent\n");
         write32(EMMC + 0x34, old_enable);
         write32(EMMC + 0x38, old_signal);
+        write8(EMMC + 0x28, old_control);
         return -1;
     }
     write16(EMMC + 0x0e, (cmd << 8) | 0x3a); /* R1, CRC, index, data */
@@ -116,6 +125,7 @@ static int read_block(unsigned cmd, uint32_t arg, uint8_t *out)
 done:
     write32(EMMC + 0x34, old_enable);
     write32(EMMC + 0x38, old_signal);
+    write8(EMMC + 0x28, old_control);
     return rc;
 }
 static uint32_t le32(const uint8_t *p)
@@ -199,13 +209,13 @@ void secondary_main(uint64_t idx)
         hex("executing MPIDR", RSR("mpidr_el1"));
         hex("executing TGran16", (RSR("id_aa64mmfr0_el1") >> 20) & 15);
         emmc_probe();
-        puts_uart("PROBE 3 COMPLETE; waiting for hardware reset\n");
+        puts_uart("PROBE 4 COMPLETE; waiting for hardware reset\n");
         for (;;) __asm__ volatile("wfe");
     }
 }
 void shim_main(uint64_t dtb)
 {
-    puts_uart("\nGM9PRO SHIM PROBE 3\n");
+    puts_uart("\nGM9PRO SHIM PROBE 4\n");
     hex("CurrentEL", RSR("CurrentEL"));
     hex("DTB", dtb);
     hex("SCTLR_EL1", RSR("sctlr_el1"));
