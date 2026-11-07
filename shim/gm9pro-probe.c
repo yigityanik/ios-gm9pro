@@ -3,6 +3,10 @@
  * Only EXT_CSD and single-block reads are issued to storage.
  */
 #include <stdint.h>
+#ifdef GM9PRO_XNU_LOADER
+#include "loader.h"
+extern char _end[];
+#endif
 #define UART 0x0c170000UL
 #define EMMC 0x0c0c4000UL
 #define RSR(r) ({ uint64_t v; __asm__ volatile("mrs %0, " r : "=r"(v)); v; })
@@ -224,7 +228,13 @@ void secondary_main(uint64_t idx)
         puts_uart("BIG CORE HANDOFF\n");
         hex("executing MPIDR", RSR("mpidr_el1"));
         hex("executing TGran16", (RSR("id_aa64mmfr0_el1") >> 20) & 15);
+#ifdef GM9PRO_XNU_LOADER
+        const char *error = loader_boot_rd((uintptr_t)_end,
+            (uintptr_t)_end + PAYLOAD_BYTES);
+        puts_uart("XNU loader returned: "); puts_uart(error); puts_uart("\n");
+#else
         emmc_probe();
+#endif
         puts_uart("PROBE 5 COMPLETE; waiting for hardware reset\n");
         for (;;) __asm__ volatile("wfe");
     }

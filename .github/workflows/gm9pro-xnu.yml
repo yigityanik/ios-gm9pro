@@ -56,14 +56,15 @@ jobs:
           assert s.count('    patches\n') == 1
           s = s.replace('    patches\n', '    patches\n    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro.py" "$WORK_DIR/xnu"\n')
           # Do not package a kernel after an unapplied device patch.
-          s = s.replace('warning "Skipping patch ${PATCH}', 'error "Skipping patch ${PATCH}')
-          s = s.replace('already upstream, previously applied, or malformed): ${APPLY_CHECK}"',
-                        'already upstream, previously applied, or malformed): ${APPLY_CHECK}"; exit 1')
+          s = s.replace('                warning "Skipping patch ${PATCH}',
+                        '                if [[ "$(basename "$PATCH")" == 0[0-9][0-9][0-9]-* ]]; then echo "Device patch failed: $PATCH" >&2; exit 1; fi\n                warning "Skipping patch ${PATCH}')
           p.write_text(s)
           PY
       - name: Build kernel
         working-directory: dxb
-        run: bash build.sh 2>&1 | tee "$GITHUB_WORKSPACE/gm9pro-build.log"
+        run: |
+          set -o pipefail
+          bash build.sh 2>&1 | tee "$GITHUB_WORKSPACE/gm9pro-build.log"
       - name: Collect kernel
         run: |
           mkdir -p out

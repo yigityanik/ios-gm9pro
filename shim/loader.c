@@ -128,12 +128,14 @@ const char *loader_boot_rd(uint64_t rd_start, uint64_t rd_end)
 	ba->physBase = p->phys_base;
 	ba->memSize = p->mem_size;
 	ba->topOfKernelData = top;
+#ifndef GM9PRO_XNU_LOADER
 	ba->Video.v_baseAddr = FB_BASE;
 	ba->Video.v_display = 1;
 	ba->Video.v_rowBytes = FB_STRIDE;
 	ba->Video.v_width = FB_W;
 	ba->Video.v_height = FB_H;
 	ba->Video.v_depth = FB_BPP * 8;
+#endif
 	ba->deviceTreeP = adt_pa - pa_of_va_base;	/* xnu reads it with the MMU on: a VA */
 	ba->deviceTreeLength = (uint32_t)p->adt_size;
 	for (int i = 0; i < BOOT_LINE_LENGTH; i++)
