@@ -18,6 +18,14 @@ def update(path, transform):
 update('makedefs/MakeInc.def', lambda s: s.replace(
     '-mcpu=kryo', '-mcpu=cortex-a73'))
 
+# Xcode 16's IIG emits a separate kernel message-content pointer. Keep it
+# initialized for callers that only fill the original four IORPC fields.
+update('iokit/IOKit/IORPC.h', lambda s: s.replace(
+    '\tuint32_t           replySize;\n',
+    '\tuint32_t           replySize;\n#ifdef __cplusplus\n'
+    '\tIORPCMessage * kernelContent = nullptr;\n#else\n'
+    '\tIORPCMessage * kernelContent;\n#endif\n'))
+
 def function(text, name, body):
     match = re.search(r"\b" + name + r"\([^;{}]*\)\s*\{", text)
     if not match:
@@ -103,7 +111,11 @@ void sweet_early_disable(void) { }
 
 def serial(s):
     start = s.index('extern unsigned char iso_font[256 * 16];')
-    end = s.index('#endif', s.index('fbcon_probe(void)', start))
+    begin = s.index('{', s.index('fbcon_probe(void)', start))
+    end, level = begin + 1, 1
+    while level:
+        level += (s[end] == '{') - (s[end] == '}')
+        end += 1
     return s[:start] + '''static void fbcon_init(void) { }
 static unsigned int fbcon_transmit_ready(void) { return 1; }
 static void fbcon_transmit_data(uint8_t c) { sweet_early_putc((char)c); }
