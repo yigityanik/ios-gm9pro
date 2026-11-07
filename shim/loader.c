@@ -11,6 +11,9 @@
 #include "console.h"
 #include "fdt.h"
 #include "loader.h"
+#ifdef GM9PRO_XNU_LOADER
+extern int gm9pro_prepare_gic(void);
+#endif
 
 #define BOOT_LINE_LENGTH	608
 #define PAGE_16K		0x4000UL
@@ -149,6 +152,9 @@ const char *loader_boot_rd(uint64_t rd_start, uint64_t rd_end)
 	uintptr_t entry_pa = p->entry_va + pa_of_va_base;
 	con_hex("JUMP", entry_pa);
 #ifdef GM9PRO_XNU_LOADER
+	if (!gm9pro_prepare_gic()) {
+		return "GIC affinity routing setup failed";
+	}
 	con_str("XNU", "jumping from big CPU (UART console)");
 #else
 	con_str("XNU", "jumping (fbcon clears screen)");
