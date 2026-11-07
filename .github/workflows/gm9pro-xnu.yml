@@ -1,0 +1,81 @@
+name: GM9 Pro XNU entry
+on:
+  push:
+    branches: [gm9pro]
+    paths:
+      - xnu/**
+      - tools/prepare-gm9pro.py
+      - shim/gm9pro-probe.c
+      - .github/workflows/gm9pro-xnu.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: gm9pro-xnu
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 120
+    env:
+      MACOS_VERSION: '13.5'
+      KERNEL_CONFIG: DEVELOPMENT
+      MACHINE_CONFIG: SWEET
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare build tools
+        run: |
+          brew install jq gum bash cmake ninja
+          printf '#!/bin/sh\nexit 0\n' | sudo tee /usr/local/bin/xcodes >/dev/null
+          sudo chmod +x /usr/local/bin/xcodes
+          XC=/Applications/Xcode_15.4.app
+          test -d "$XC"
+          echo "DEVELOPER_DIR=$XC/Contents/Developer" >> "$GITHUB_ENV"
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+      - name: Prepare XNU sources
+        run: |
+          git init -q dxb
+          git -C dxb fetch -q --depth 1 https://github.com/blacktop/darwin-xnu-build 663906528d1cd5ea8fde7de6f16de73db9511549
+          git -C dxb checkout -q FETCH_HEAD
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          # Initial kernel entry only: keep the proven SWEET bootstrap without
+          # installing Pixel GPU, RPM, touch, Wi-Fi or storage drivers.
+          for p in Path('xnu/patches').iterdir():
+              if p.suffix in ('.patch', '.sh') and (int(p.name[:4]) <= 18 or p.name == '0080-sweet-armv8.0-baseline.patch'):
+                  shutil.copyfile(p, Path('dxb/patches') / p.name)
+          p = Path('dxb/build.sh')
+          s = p.read_text()
+          old = 'ARCHS="x86_64 arm64e" VALID_ARCHS="x86_64 arm64e"'
+          assert old in s
+          s = s.replace(old, old + ' OTHER_CFLAGS=\'$(inherited) -mcpu=cortex-a73\'')
+          s = s.replace('ARCHS="x86_64 arm64e" VALID_ARCHS="x86_64 arm64e"',
+                        'ARCHS="arm64" VALID_ARCHS="arm64"')
+          assert s.count('    patches\n') == 1
+          s = s.replace('    patches\n', '    patches\n    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro.py" "$WORK_DIR/xnu"\n')
+          # Do not package a kernel after an unapplied device patch.
+          s = s.replace('warning "Skipping patch ${PATCH}', 'error "Skipping patch ${PATCH}')
+          s = s.replace('already upstream, previously applied, or malformed): ${APPLY_CHECK}"',
+                        'already upstream, previously applied, or malformed): ${APPLY_CHECK}"; exit 1')
+          p.write_text(s)
+          PY
+      - name: Build kernel
+        working-directory: dxb
+        run: bash build.sh 2>&1 | tee "$GITHUB_WORKSPACE/gm9pro-build.log"
+      - name: Collect kernel
+        run: |
+          mkdir -p out
+          find dxb/fakeroot/System/Library/Kernels -type f -name '*sweet*' -exec cp {} out/ \;
+          test -n "$(find out -type f -name '*sweet*' -print -quit)"
+          shasum -a 256 out/* > out/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gm9pro-xnu-kernel
+          path: out/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gm9pro-xnu-build-log
+          path: gm9pro-build.log
