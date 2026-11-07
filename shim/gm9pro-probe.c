@@ -146,6 +146,22 @@ static uint32_t crc32(const uint8_t *p, unsigned len)
 static void emmc_probe(void)
 {
     uint8_t ext[512], sector[512], again[512];
+    /* SDCC v5: sdhci-msm's CORE_VENDOR_SPEC3 is at 0x250. Linux clears
+     * CORE_FIFO_ALT_EN (bit 10) to enable the standard SDHCI buffer port.
+     * Do this only while both command and data engines are idle.
+     */
+    if (read32(EMMC + 0x24) & 3) {
+        puts_uart("eMMC busy before FIFO selection; stopping\n"); return;
+    }
+    uint32_t vendor3 = read32(EMMC + 0x250);
+    hex("SDCC vendor3 before", vendor3);
+    write32(EMMC + 0x250, vendor3 & ~(1U << 10));
+    __asm__ volatile("dsb sy" ::: "memory");
+    uint32_t selected = read32(EMMC + 0x250);
+    hex("SDCC vendor3 after", selected);
+    if (selected != (vendor3 & ~(1U << 10))) {
+        puts_uart("SDHCI FIFO selection readback mismatch; stopping\n"); return;
+    }
     puts_uart("eMMC CMD8 EXT_CSD\n");
     if (read_block(8, 0, ext)) return;
     hex("EXT_CSD revision", ext[192]);
@@ -209,13 +225,13 @@ void secondary_main(uint64_t idx)
         hex("executing MPIDR", RSR("mpidr_el1"));
         hex("executing TGran16", (RSR("id_aa64mmfr0_el1") >> 20) & 15);
         emmc_probe();
-        puts_uart("PROBE 4 COMPLETE; waiting for hardware reset\n");
+        puts_uart("PROBE 5 COMPLETE; waiting for hardware reset\n");
         for (;;) __asm__ volatile("wfe");
     }
 }
 void shim_main(uint64_t dtb)
 {
-    puts_uart("\nGM9PRO SHIM PROBE 4\n");
+    puts_uart("\nGM9PRO SHIM PROBE 5\n");
     hex("CurrentEL", RSR("CurrentEL"));
     hex("DTB", dtb);
     hex("SCTLR_EL1", RSR("sctlr_el1"));
