@@ -26,6 +26,29 @@ update('iokit/IOKit/IORPC.h', lambda s: s.replace(
     '\tIORPCMessage * kernelContent = nullptr;\n#else\n'
     '\tIORPCMessage * kernelContent;\n#endif\n'))
 
+def uuid_hash_check(s):
+    marker = 'IOPlatformExpertDevice::generatePlatformUUID( void )\n{'
+    if s.count(marker) != 1:
+        raise RuntimeError('Platform UUID function changed')
+    return s.replace(marker, marker + '''
+    /* Check the provider before platform identity first depends on it. */
+    {
+        SHA1_CTX context;
+        unsigned char digest[20];
+        static const unsigned char expected[20] = {
+            0xa9,0x99,0x3e,0x36,0x47,0x06,0x81,0x6a,0xba,0x3e,
+            0x25,0x71,0x78,0x50,0xc2,0x6c,0x9c,0xd0,0xd8,0x9d
+        };
+        SHA1Init(&context);
+        SHA1Update(&context, "abc", 3);
+        SHA1Final(digest, &context);
+        if (memcmp(digest, expected, sizeof(expected)))
+            panic("GM9 SHA1 known-answer test failed");
+        IOLog("GM9 SHA1 known-answer test passed\\n");
+    }
+''')
+update('iokit/Kernel/IOPlatformExpert.cpp', uuid_hash_check)
+
 def function(text, name, body):
     match = re.search(r"\b" + name + r"\([^;{}]*\)\s*\{", text)
     if not match:
