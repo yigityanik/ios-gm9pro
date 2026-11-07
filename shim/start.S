@@ -17,16 +17,40 @@ _head:
 	.long	0			/* res5 (PE offset) */
 
 	.text
+
+/* Diagnostic markers independent of stack, BSS, strings and the timer. */
+.macro early_uart ch
+	mov	x9, #0x0008
+	movk	x9, #0x0c17, lsl #16
+	mov	w10, #0xffff
+90:	ldr	w11, [x9]
+	tbnz	w11, #3, 91f
+	subs	w10, w10, #1
+	b.ne	90b
+	b	92f
+91:	mov	w11, #1
+	str	w11, [x9, #0x38]
+	mov	w11, #\ch
+	str	w11, [x9, #0x68]
+	dsb	sy
+92:
+.endm
 	.globl _start
 _start:
 	msr	daifset, #0xf
 	mov	x19, x0			/* DTB pointer from ABL */
+#ifdef GM9PRO_ENTRY_TRACE
+	early_uart 69 /* E: entered Image */
+#endif
 	msr	spsel, #1
 	adr	x1, _stack_top
 	mov	sp, x1
 	adr	x1, vectors
 	msr	vbar_el1, x1
 	isb
+#ifdef GM9PRO_ENTRY_TRACE
+	early_uart 83 /* S: stack and exception vectors installed */
+#endif
 	/* zero .bss */
 	adr	x1, _bss_start
 	adr	x2, _bss_end
@@ -34,7 +58,11 @@ _start:
 	b.hs	2f
 	str	xzr, [x1], #8
 	b	1b
-2:	mov	x0, x19
+2:
+#ifdef GM9PRO_ENTRY_TRACE
+	early_uart 67 /* C: BSS cleared, entering C */
+#endif
+	mov	x0, x19
 	bl	shim_main
 3:	wfe
 	b	3b

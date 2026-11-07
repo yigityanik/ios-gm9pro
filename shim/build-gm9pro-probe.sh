@@ -5,7 +5,7 @@ stock=$(realpath "$1")
 cd "$(dirname "$0")"
 cc=${CROSS_COMPILE:-aarch64-linux-gnu-}
 mkdir -p out/gm9pro
-flags=(-O2 -ffreestanding -nostdlib -fno-pic -mgeneral-regs-only -mstrict-align -fno-stack-protector -Wall -Wextra -Werror)
+flags=(-O2 -ffreestanding -nostdlib -fno-pic -mgeneral-regs-only -mstrict-align -fno-stack-protector -Wall -Wextra -Werror -DGM9PRO_ENTRY_TRACE)
 for source in start.S gm9pro-probe.c; do
     "${cc}gcc" "${flags[@]}" -c "$source" -o "out/gm9pro/${source%.*}.o"
 done
