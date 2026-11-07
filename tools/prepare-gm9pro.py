@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply GM9 Pro bring-up overrides after the first 18 SWEET patches."""
+"""Apply GM9 Pro platform overrides to the SWEET bootstrap."""
 from pathlib import Path
 import re
 import sys
@@ -167,6 +167,7 @@ preamble = r'''#include <pexpert/pexpert.h>
 #include <stdint.h>
 extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
 static uintptr_t regs;
+static bool gm9_quiet;
 #define EMMC regs
 #define RSR(r) ({ uint64_t v; __asm__ volatile("mrs %0, " r : "=r"(v)); v; })
 static uint32_t read32(uintptr_t a) { return *(volatile uint32_t *)a; }
@@ -176,7 +177,7 @@ static void write8(uintptr_t a, uint8_t v) { *(volatile uint8_t *)a = v; }
 static uint64_t ticks(void) { return RSR("cntpct_el0"); }
 static uint64_t freq(void) { return RSR("cntfrq_el0"); }
 static void puts_uart(const char *s) { printf("%s", s); }
-static void hex(const char *s, uint64_t v) { printf("%s=0x%llx\n", s, (unsigned long long)v); }
+static void hex(const char *s, uint64_t v) { if (!gm9_quiet) printf("%s=0x%llx\n", s, (unsigned long long)v); }
 void gm9pro_emmc_selftest(void);
 '''
 tail = r'''
@@ -189,7 +190,8 @@ void gm9pro_emmc_selftest(void)
     panic("GM9 eMMC diagnostic finished; root driver not installed yet");
 }
 '''
-(source / 'bsd/dev/gm9pro_emmc.c').write_text(preamble + reader + tail)
+(source / 'bsd/dev/gm9pro_emmc.c').write_text(
+    preamble + reader + tail + (repo / 'xnu/gm9pro-emmc.inc').read_text())
 update('bsd/conf/files', lambda s: s + '\nbsd/dev/gm9pro_emmc.c\t\tstandard\n')
 
 def root(s):
@@ -198,10 +200,32 @@ def root(s):
     if not match:
         raise RuntimeError('IOFindBSDRoot definition missing')
     begin = match.end() - 1
-    return 'extern "C" void gm9pro_emmc_selftest(void);\n' + s[:begin + 1] + '''
+    s = s[:begin + 1] + '''
     unsigned int gm9test = 0;
-    if (PE_parse_boot_argn("gm9emmc", &gm9test, sizeof(gm9test)) && gm9test)
-        gm9pro_emmc_selftest();
+    if (PE_parse_boot_argn("gm9emmc", &gm9test, sizeof(gm9test))) {
+        if (gm9test == 1) gm9pro_emmc_selftest();
+        if (gm9test == 2) gm9pro_emmc_disk_test();
+    }
 ''' + s[begin + 1:]
+    marker = '//\n//\tNow check if we are trying to root on a memory device'
+    if s.count(marker) != 1:
+        raise RuntimeError('Memory-root selection marker changed')
+    s = s.replace(marker, '''
+    if (strcmp(rdBootVar, "emmcroot0") == 0) {
+        int error = gm9pro_emmc_rootdev(root);
+        if (error) panic("IOFindBSDRoot: eMMC root unavailable: %d", error);
+        OSSafeReleaseNULL(matching);
+        strlcpy(rootName, "emmcroot0", rootNameSize);
+        *oflags = 0;
+        goto iofrootx;
+    }
+''' + marker)
+    definition = 'kern_return_t\nIOFindBSDRoot('
+    if s.count(definition) != 1:
+        raise RuntimeError('Root function declaration changed')
+    return s.replace(definition,
+        'extern "C" void gm9pro_emmc_selftest(void);\n'
+        'extern "C" void gm9pro_emmc_disk_test(void);\n'
+        'extern "C" int gm9pro_emmc_rootdev(dev_t *dev);\n' + definition)
 update('iokit/bsddev/IOKitBSDInit.cpp', root)
 print('GM9 Pro UART, early mapping and eMMC self-test staged')

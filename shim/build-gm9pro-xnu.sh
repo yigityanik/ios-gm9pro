@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 mkdir -p out/gm9pro-xnu
 python3 ../tools/mkadt-gm9pro.py out/gm9pro-xnu/gm9pro.adt
 python3 ../tools/mkpayload.py "$kernel" out/gm9pro-xnu/gm9pro.adt out/gm9pro-xnu/payload \
-    --cmdline 'debug=0x14e serial=3 cpus=1 keepsyms=1 -noprogress gm9emmc=1 rd=md0'
+    --cmdline 'debug=0x14e serial=3 cpus=1 keepsyms=1 -noprogress gm9emmc=2 rd=md0'
 cc=${CROSS_COMPILE:-aarch64-linux-gnu-}
 bytes=$(wc -c < out/gm9pro-xnu/payload)
 flags=(-O2 -ffreestanding -nostdlib -fno-pic -mgeneral-regs-only -mstrict-align -fno-stack-protector -Wall -Wextra -Werror -Wno-unused-function -DGM9PRO_ENTRY_TRACE -DGM9PRO_XNU_LOADER "-DPAYLOAD_BYTES=$bytes")
