@@ -23,4 +23,11 @@ done
 end=$("${cc}nm" out/gm9pro-xnu/shim.elf | awk '$3=="_end" {print $1}')
 truncate -s "$((16#$end))" out/gm9pro-xnu/Image
 cat out/gm9pro-xnu/payload >> out/gm9pro-xnu/Image
+# ABL's observed DTB destination is 0x83200000; the stock kernel address is
+# 0x80008000. Refuse an appended payload that would run into that DTB.
+image_bytes=$(wc -c < out/gm9pro-xnu/Image)
+if (( image_bytes > 0x83200000 - 0x80008000 )); then
+    echo 'XNU payload overlaps the observed ABL DTB destination' >&2
+    exit 1
+fi
 python3 ../tools/mkboot-gm9pro.py "$stock" out/gm9pro-xnu/Image out/gm9pro-xnu/gm9pro-xnu-entry.img
