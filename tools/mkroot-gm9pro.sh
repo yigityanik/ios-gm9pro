@@ -13,7 +13,7 @@ cleanup() {
 trap cleanup EXIT
 mkdir "$work/mnt"
 hdiutil create -size 32m -fs HFSX -layout NONE \
-    -format UDRW "$work/root.dmg"
+    -type UDIF "$work/root.dmg"
 hdiutil attach -quiet -nobrowse -owners on -mountpoint "$work/mnt" "$work/root.dmg"
 mounted=1
 sudo mkdir -p "$work/mnt/sbin" "$work/mnt/dev" "$work/mnt/private/var"
