@@ -47,7 +47,7 @@ jobs:
           # Initial kernel entry only: keep the proven SWEET bootstrap without
           # installing Pixel GPU, RPM, touch, Wi-Fi or storage drivers.
           for p in Path('xnu/patches').iterdir():
-              selected = {20, 21, 22, 23, 24, 25, 26, 27, 29, 32, 33, 35, 36, 37, 38, 39, 42, 43, 44}
+              selected = {20, 21, 22, 23, 24, 25, 26, 27, 29, 32, 33, 35, 36, 37, 38, 39, 40, 42, 43, 44, 45}
               if p.suffix in ('.patch', '.sh') and (int(p.name[:4]) <= 19 or int(p.name[:4]) in selected or p.name == '0080-sweet-armv8.0-baseline.patch'):
                   shutil.copyfile(p, Path('dxb/patches') / p.name)
                   if p.name == '0043-sweet-console-crash-log.patch':
