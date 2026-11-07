@@ -7,6 +7,7 @@
 #define SET(r,v) __asm__ volatile("msr " r ", %0" : : "r"((uint64_t)(v)) : "memory")
 extern void secondary_entry(void);
 static volatile uint64_t release_big, hits, last_irq;
+static volatile uint64_t irq_mask;
 static uint32_t rd(uintptr_t a) { return *(volatile uint32_t *)a; }
 static void wr(uintptr_t a, uint32_t v)
 { *(volatile uint32_t *)a = v; __asm__ volatile("dsb sy" ::: "memory"); }
@@ -56,10 +57,10 @@ void secondary_main(uint64_t index)
         if (now() >= end) { con_str("GIC", "redistributor wake timeout"); return; }
     wr(r + 0x10180, 0xffffffffU); /* mask inherited private interrupts */
     wr(r + 0x10080, 0xffffffffU);
-    *(volatile uint8_t *)(r + 0x10401) = 0xa0;
+    for (unsigned i = 0; i < 16; i += 4) wr(r + 0x10400 + i, 0xa0a0a0a0);
     wr(r + 0x10280, 2); /* clear pending SGI1 */
     wr(r + 0x10380, 2); /* clear stale active SGI1 */
-    wr(r + 0x10100, 2);
+    wr(r + 0x10100, 0xffff);
     wr(GICD, rd(GICD) | 0x13);
     end = now() + GET("cntfrq_el0");
     while (rd(GICD) & (1U << 31))
@@ -93,11 +94,52 @@ void secondary_main(uint64_t index)
         if ((iar & 0xffffff) < 1020) SET("icc_eoir1_el1", iar);
     }
     con_str("GIC TEST", hits ? "IRQ DELIVERY PASS" : "NO IRQ DELIVERY");
+    uint64_t sent = sgi & ~(15ULL << 24);
+    for (unsigned id = 0; id < 16; id++) {
+        uint64_t before = irq_mask;
+        SET("icc_sgi1r_el1", sent | ((uint64_t)id << 24));
+        __asm__ volatile("dsb sy; isb" ::: "memory");
+        end = now() + GET("cntfrq_el0") / 100;
+        __asm__ volatile("msr daifclr, #2; isb" ::: "memory");
+        while (irq_mask == before && now() < end) __asm__ volatile("yield");
+        __asm__ volatile("msr daifset, #2; isb" ::: "memory");
+        uint64_t iar = GET("icc_iar1_el1");
+        if ((iar & 0xffffff) < 1020) {
+            con_hex("sweep manually acknowledged INTID", iar);
+            SET("icc_eoir1_el1", iar);
+        }
+    }
+    con_hex("SGI sweep IRQ mask", irq_mask);
+    con_hex("SGI enable mask after sweep", rd(r + 0x10100));
+    con_str("GIC TEST", "SGI sweep complete");
     for (;;) __asm__ volatile("wfe");
 }
 void shim_main(uint64_t dtb)
 {
-    con_str("GM9PRO", "GIC SGI diagnostic 1"); con_hex("DTB", dtb);
+    con_str("GM9PRO", "GIC SGI diagnostic 2"); con_hex("DTB", dtb);
+    con_hex("primary MPIDR", GET("mpidr_el1"));
+    uintptr_t primary = frame();
+    if (!primary) { con_str("GIC", "primary frame missing"); return; }
+    con_str("GIC", "primary access before configuration"); dump(primary);
+    wr(primary + 0x10080, 0xffffffffU);
+    wr(primary + 0x10100, 0xffff);
+    wr(primary + 0x10400, 0xa0a0a0a0);
+    wr(GICD, rd(GICD) | 0x13);
+    con_str("GIC", "primary access after configuration"); dump(primary);
+    /* Compare access to the target frame from the original boot CPU. */
+    for (uintptr_t off = 0; off < 0x100000; off += 0x20000) {
+        uintptr_t remote = GICR + off;
+        uint64_t typer = *(volatile uint64_t *)(remote + 8);
+        if (((typer >> 32) & 0xffffff) == 0x100) {
+            wr(remote + 0x14, rd(remote + 0x14) & ~2U);
+            wr(remote + 0x10080, 0xffffffffU);
+            wr(remote + 0x10100, 0xffff);
+            wr(remote + 0x10400, 0xa0a0a0a0);
+            con_str("GIC", "target frame configured by primary"); dump(remote);
+            break;
+        }
+        if (typer & 16) break;
+    }
     register uint64_t x0 __asm__("x0") = 0xc4000003;
     register uint64_t x1 __asm__("x1") = 0x100;
     register uint64_t x2 __asm__("x2") = (uintptr_t)secondary_entry;
@@ -115,6 +157,7 @@ void exc_handler(uint64_t slot, uint64_t *regs)
         uint64_t iar = GET("icc_iar1_el1");
         unsigned int id = iar & 0xffffff;
         last_irq = id;
+        if (id < 16) irq_mask |= 1ULL << id;
         if (id == 1) hits++;
         if (id < 1020) {
             if (id >= 32) wr(GICD + 0x180 + (id / 32) * 4, 1U << (id % 32));
