@@ -88,6 +88,15 @@ done
 mkdir -p "$r/dev" "$r/private/var/run" "$r/private/var/db"
 mkdir -p "$r/private/tmp" "$r/private/var/tmp"
 chmod 1777 "$r/private/tmp" "$r/private/var/tmp"
+# Match the existing experimental no-passcode KeyStore test setup. This is
+# only a placeholder for bring-up, not a real SEP-protected system keybag.
+install -d -m 0700 -o 0 -g 0 "$r/private/var/keybags"
+printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+    '<plist version="1.0"><dict><key>KeyBagKeys</key><data>U1dFRVQ=</data></dict></plist>' \
+    > "$r/private/var/keybags/systembag.kb"
+chown 0:0 "$r/private/var/keybags/systembag.kb"
+chmod 0600 "$r/private/var/keybags/systembag.kb"
 cmp "$work/os/root/sbin/launchd" "$r/sbin/launchd"
 cmp "$work/os/root/usr/lib/dyld" "$r/usr/lib/dyld"
 sha256sum "$r/sbin/launchd" "$r/usr/lib/dyld"
