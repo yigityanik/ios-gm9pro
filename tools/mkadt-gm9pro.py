@@ -27,6 +27,5 @@ setprop(gic, 'reg', struct.pack('<4Q', 0x17a00000 - mkadt.SOC_BASE, 0x10000,
 setprop(gic, 'virtual-timer-intid', struct.pack('<I', 19))
 setprop(gic, 'redistributor-stride', struct.pack('<I', 0x20000))
 root.children = [n for n in root.children if n.name not in ('sweet-fbcon', 'sweet-ufs')]
-armio.children = [n for n in armio.children if n.name != 'disp0']
 Path(sys.argv[1]).write_bytes(adt.serialize(root))
-print('GM9 Pro ADT: CPU 0x100, GIC 0x17a00000/0x17b00000, UART diagnostics')
+print('GM9 Pro ADT: CPU 0x100, GIC 0x17a00000/0x17b00000, display 1125x2436, UART diagnostics')

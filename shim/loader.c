@@ -133,7 +133,19 @@ const char *loader_boot_rd(uint64_t rd_start, uint64_t rd_end)
 	ba->physBase = p->phys_base;
 	ba->memSize = p->mem_size;
 	ba->topOfKernelData = top;
-#ifndef GM9PRO_XNU_LOADER
+
+#ifdef GM9PRO_XNU_LOADER
+	/* ABL leaves the SDM660 MDP scanning this reserved framebuffer. */
+	ba->Video.v_baseAddr = 0x9d400000ULL;
+	ba->Video.v_display = 1;
+	ba->Video.v_rowBytes = 4320;
+	ba->Video.v_width = 1080;
+	ba->Video.v_height = 2160;
+	ba->Video.v_depth = 32;
+	con_hex("VIDEO base", ba->Video.v_baseAddr);
+	con_hex("VIDEO stride", ba->Video.v_rowBytes);
+	con_hex("VIDEO size", (ba->Video.v_width << 32) | ba->Video.v_height);
+#else
 	ba->Video.v_baseAddr = FB_BASE;
 	ba->Video.v_display = 1;
 	ba->Video.v_rowBytes = FB_STRIDE;
