@@ -44,7 +44,7 @@ jobs:
           # Initial kernel entry only: keep the proven SWEET bootstrap without
           # installing Pixel GPU, RPM, touch, Wi-Fi or storage drivers.
           for p in Path('xnu/patches').iterdir():
-              crypto = {20, 23, 27, 32, 33}
+              crypto = {20, 21, 22, 23, 24, 27, 32, 33}
               if p.suffix in ('.patch', '.sh') and (int(p.name[:4]) <= 19 or int(p.name[:4]) in crypto or p.name == '0080-sweet-armv8.0-baseline.patch'):
                   shutil.copyfile(p, Path('dxb/patches') / p.name)
           p = Path('dxb/build.sh')
@@ -71,6 +71,9 @@ jobs:
           mkdir -p out
           find dxb/fakeroot/System/Library/Kernels -type f -name '*sweet*' -exec cp {} out/ \;
           test -n "$(find out -type f -name '*sweet*' -print -quit)"
+          clang -target arm64-apple-ios16.0 -c tools/gm9pro-init.S -o out/gm9pro-init.o
+          python3 tools/mkinit.py out/gm9pro-init.o out/gm9pro-init.bin
+          rm out/gm9pro-init.o
           shasum -a 256 out/* > out/SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
