@@ -58,6 +58,49 @@ _start:
 	sub	x2, x2, x1
 	bl	write_console
 
+    /* Read a separate file through the mounted root filesystem. */
+    adr x0, marker_path
+    mov x1, #0
+    mov x2, #0
+    mov x16, #SYS_open
+    svc #0x80
+    b.cs root_fail
+    mov x20, x0
+    sub sp, sp, #32
+    mov x1, sp
+    mov x2, #16
+    mov x16, #3
+    svc #0x80
+    b.cs read_fail
+    cmp x0, #16
+    b.ne read_fail
+    mov x9, #0
+    adr x10, marker_expected
+compare_marker:
+    ldrb w11, [sp, x9]
+    ldrb w12, [x10, x9]
+    cmp w11, w12
+    b.ne read_fail
+    add x9, x9, #1
+    cmp x9, #16
+    b.ne compare_marker
+    add sp, sp, #32
+    mov x0, x20
+    mov x16, #6
+    svc #0x80
+    adr x1, root_pass
+    adr x2, root_pass_end
+    sub x2, x2, x1
+    bl write_console
+    b tick
+read_fail:
+    add sp, sp, #32
+root_fail:
+    adr x1, root_error
+    adr x2, root_error_end
+    sub x2, x2, x1
+    bl write_console
+
 tick:
 	/* select(0, NULL, NULL, NULL, &5s) as a portable sleep */
 	mov	x0, #0
@@ -97,3 +140,14 @@ hello_tail:
 alive:
 	.ascii	"GM9 init: still alive\n"
 alive_end:
+
+marker_path:
+    .asciz "/GM9-HFS-TEST"
+marker_expected:
+    .ascii "GM9 HFS root OK\n"
+root_pass:
+    .ascii "GM9 HFS ROOT FILE READ PASS\n"
+root_pass_end:
+root_error:
+    .ascii "GM9 HFS ROOT FILE READ FAILED\n"
+root_error_end:

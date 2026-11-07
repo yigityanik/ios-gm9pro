@@ -7,6 +7,8 @@ cd "$(dirname "$0")"
 mkdir -p out/gm9pro-xnu
 python3 ../tools/mkadt-gm9pro.py out/gm9pro-xnu/gm9pro.adt
 init="$(dirname "$kernel")/gm9pro-init.bin"
+root="$(dirname "$kernel")/gm9pro-root.img"
+if [[ -f "$root" ]]; then init="$root"; fi
 args=()
 cmdline='debug=0x14e serial=3 cpus=1 keepsyms=1 -noprogress gm9emmc=2 rd=md0'
 if [[ -f "$init" ]]; then
