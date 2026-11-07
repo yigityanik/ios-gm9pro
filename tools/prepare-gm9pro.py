@@ -137,6 +137,7 @@ update('pexpert/arm/pe_serial.c', serial)
 # of a physical MMIO pointer. This is a diagnostic entry, not a root device.
 probe = (repo / 'shim/gm9pro-probe.c').read_text()
 reader = probe[probe.index('/* Reuse ABL'):probe.index('static int64_t cpu_on')]
+reader = re.sub(r'\bcrc32\b', 'gm9_crc32', reader)
 reader = reader.replace('__asm__ volatile("dsb sy; sev"', '__asm__ volatile("dsb sy\\nsev"')
 preamble = r'''#include <pexpert/pexpert.h>
 #include <sys/systm.h>
