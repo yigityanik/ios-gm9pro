@@ -61,6 +61,13 @@ jobs:
                         '                if [[ "$(basename "$PATCH")" == 0[0-9][0-9][0-9]-* ]]; then echo "Device patch failed: $PATCH" >&2; exit 1; fi\n                warning "Skipping patch ${PATCH}')
           p.write_text(s)
           PY
+      - name: Prepare test root
+        run: |
+          mkdir -p out
+          clang -target arm64-apple-ios16.0 -c tools/gm9pro-init.S -o out/gm9pro-init.o
+          python3 tools/mkinit.py out/gm9pro-init.o out/gm9pro-init.bin
+          rm out/gm9pro-init.o
+          bash -x tools/mkroot-gm9pro.sh out/gm9pro-init.bin out/gm9pro-root.img
       - name: Build kernel
         working-directory: dxb
         run: |
@@ -71,10 +78,6 @@ jobs:
           mkdir -p out
           find dxb/fakeroot/System/Library/Kernels -type f -name '*sweet*' -exec cp {} out/ \;
           test -n "$(find out -type f -name '*sweet*' -print -quit)"
-          clang -target arm64-apple-ios16.0 -c tools/gm9pro-init.S -o out/gm9pro-init.o
-          python3 tools/mkinit.py out/gm9pro-init.o out/gm9pro-init.bin
-          rm out/gm9pro-init.o
-          bash tools/mkroot-gm9pro.sh out/gm9pro-init.bin out/gm9pro-root.img
           shasum -a 256 out/* > out/SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
