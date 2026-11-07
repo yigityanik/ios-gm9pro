@@ -5,6 +5,9 @@ on:
     paths:
       - xnu/**
       - tools/prepare-gm9pro.py
+      - tools/mkroot-gm9pro.sh
+      - tools/gm9pro-init.S
+      - tools/mkinit.py
       - shim/gm9pro-probe.c
       - .github/workflows/gm9pro-xnu.yml
   workflow_dispatch:
