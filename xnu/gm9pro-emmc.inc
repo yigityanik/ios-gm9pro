@@ -275,7 +275,12 @@ gm9_buffer_test(dev_t dev, daddr64_t block, uint32_t count, bool reading,
     buf_setdataptr(bp, (uintptr_t)data);
     buf_setcount(bp, count);
     buf_setblkno(bp, block);
-    if (reading) buf_setflags(bp, B_READ);
+    if (reading) {
+        buf_setflags(bp, B_READ);
+    } else {
+        /* buf_biodone balances this even when strategy rejects the write. */
+        vnode_startwrite(vp);
+    }
     bdevsw[major(dev)].d_strategy(bp);
     error = buf_biowait(bp);
     if (!error && buf_resid(bp)) error = EIO;
