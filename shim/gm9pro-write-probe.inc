@@ -21,14 +21,15 @@ static uint32_t wp_crc_update(uint32_t crc, const uint8_t *p, unsigned n)
     return crc;
 }
 
-/* This only sends CMD13; RCA 1 must actually respond in transfer state. */
+/* RCA 2 responded in transfer state on the GM9 Pro diagnostic probe. */
 static int wp_card_ready(void)
 {
     uint64_t deadline = ticks() + 5 * freq();
     while (ticks() < deadline) {
         if (read32(EMMC + 0x24) & 3) continue;
         write32(EMMC + 0x30, 0xffffffffU);
-        write32(EMMC + 0x08, 1U << 16);
+        write16(EMMC + 0x0c, 0);
+        write32(EMMC + 0x08, 2U << 16);
         write16(EMMC + 0x0e, (13U << 8) | 0x1a);
         if (wait_status(1)) return -1;
         uint32_t r1 = read32(EMMC + 0x10);

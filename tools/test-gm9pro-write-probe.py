@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 
 source = (Path(__file__).resolve().parent.parent / 'shim/gm9pro-write-probe.inc').read_text()
-start = source.index('/* This only sends CMD13')
+start = source.index('/* RCA 2 responded')
 end = source.index('static int wp_userdata_name', start)
 preamble = '#include <stdint.h>\n#include <assert.h>\n#include <string.h>\n#include <stdio.h>\nstatic uint32_t le32(const uint8_t *p) { return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24; }\nstatic uint32_t crc32(const uint8_t *p, unsigned n) { uint32_t c=~0U; while(n--) { c^=*p++; for(int i=0;i<8;i++) c=(c>>1)^(0xedb88320U & (0U-(c&1))); } return ~c; }\n'
 stub = 'static int mock_writes, mock_fail_first, mock_fail_restore;\nstatic uint8_t disk_sector[512], disk_original[512], ext[512], header[512], table[2048], hfs[512];\nstatic uint32_t scratch_lba = 196952;\nstatic const char *last_message;\nstatic int read_block(unsigned cmd, uint32_t lba, uint8_t *out) {\n    const uint8_t *p = NULL;\n    if (cmd == 8) p = ext;\n    else if (cmd != 17) return -1;\n    else if (lba == 1) p = header;\n    else if (lba >= 2 && lba <= 5) p = table + (lba - 2) * 512;\n    else if (lba == 1002) p = hfs;\n    else if (lba == scratch_lba) p = disk_sector;\n    if (!p) return -1;\n    memcpy(out,p,512); return 0;\n}\nstatic int wp_write_one(uint32_t lba, const uint8_t *data, int *sent) {\n    assert(lba == scratch_lba); *sent = 1; mock_writes++;\n    if (mock_fail_restore && mock_writes == 2) return -1;\n    memcpy(disk_sector,data,512);\n    if (mock_fail_first && mock_writes == 1) return -1;\n    return 0;\n}\nstatic void puts_uart(const char *s) { last_message = s; }\nstatic void hex(const char *s, uint64_t v) { (void)s; (void)v; }\n'
