@@ -97,7 +97,8 @@ const char *loader_boot_rd(uint64_t rd_start, uint64_t rd_end)
 		return "bad payload header";
 
 	uint64_t pa_of_va_base = p->phys_base - p->virt_base;	/* pa = va + this */
-	con_hex2("PHYS", "base=", p->phys_base, "size=", p->mem_size);
+	con_hex("PHYS base", p->phys_base);
+	con_hex("PHYS size", p->mem_size);
 	con_hex("VIRT", p->virt_base);
 	con_hex("ENTRY", p->entry_va);
 
@@ -112,7 +113,8 @@ const char *loader_boot_rd(uint64_t rd_start, uint64_t rd_end)
 		if (s->vmsize > s->file_size)
 			zero64(dst + ((s->file_size + 7) & ~7UL), s->vmsize - ((s->file_size + 7) & ~7UL));
 	}
-	con_hex2("SEGS", "n=", p->nsegs, "end=", p->kernel_end + pa_of_va_base);
+	con_hex("SEGS count", p->nsegs);
+	con_hex("SEGS end", p->kernel_end + pa_of_va_base);
 
 	/* ADT, then boot_args, behind the kernel; everything below topOfKernelData is ours. */
 	uintptr_t adt_pa = p->kernel_end + pa_of_va_base;
@@ -141,11 +143,16 @@ const char *loader_boot_rd(uint64_t rd_start, uint64_t rd_end)
 	for (int i = 0; i < BOOT_LINE_LENGTH; i++)
 		ba->CommandLine[i] = p->cmdline[i];
 	ba->memSizeActual = p->mem_size;
-	con_hex2("BOOTARG", "pa=", ba_pa, "top=", top);
+	con_hex("BOOTARG pa", ba_pa);
+	con_hex("BOOTARG top", top);
 
 	uintptr_t entry_pa = p->entry_va + pa_of_va_base;
 	con_hex("JUMP", entry_pa);
+#ifdef GM9PRO_XNU_LOADER
+	con_str("XNU", "jumping from big CPU (UART console)");
+#else
 	con_str("XNU", "jumping (fbcon clears screen)");
+#endif
 	con_flush();
 
 	/* Everything was written with the MMU and caches off; drop any stale I-cache lines too. */
