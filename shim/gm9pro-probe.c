@@ -66,11 +66,21 @@ static int read_block(unsigned cmd, uint32_t arg, uint8_t *out)
     write32(EMMC + 0x38, 0);
     write32(EMMC + 0x34, old_enable | 0xffff8033U);
     write32(EMMC + 0x30, 0xffffffffU);
-    write16(EMMC + 0x04, 512);
-    write16(EMMC + 0x06, 1);
+    /* Program block size/count together, and verify the bus write landed. */
+    write32(EMMC + 0x04, (1U << 16) | 512);
     write32(EMMC + 0x08, arg);
-    write16(EMMC + 0x0c, 0x10); /* one block, read, PIO */
+    write16(EMMC + 0x0c, 0x12); /* one block, count enabled, read, PIO */
     __asm__ volatile("dsb sy" ::: "memory");
+    hex("SDHCI block size/count readback", read32(EMMC + 0x04));
+    hex("SDHCI transfer mode readback", *(volatile uint16_t *)(EMMC + 0x0c));
+    hex("SDHCI host control", read32(EMMC + 0x28));
+    hex("SDHCI host control2", *(volatile uint16_t *)(EMMC + 0x3e));
+    if (read32(EMMC + 0x04) != ((1U << 16) | 512)) {
+        puts_uart("Block configuration mismatch; command not sent\n");
+        write32(EMMC + 0x34, old_enable);
+        write32(EMMC + 0x38, old_signal);
+        return -1;
+    }
     write16(EMMC + 0x0e, (cmd << 8) | 0x3a); /* R1, CRC, index, data */
     int rc = -1;
     if (wait_status(1)) goto done;
@@ -82,12 +92,24 @@ static int read_block(unsigned cmd, uint32_t arg, uint8_t *out)
     if (!(read32(EMMC + 0x24) & 0x800)) {
         puts_uart("SDHCI FIFO not readable\n"); goto done;
     }
+    /* Acknowledge buffer-ready before draining, as in the SDHCI IRQ path. */
+    write32(EMMC + 0x30, 0x20);
+    __asm__ volatile("dsb sy" ::: "memory");
     for (unsigned i = 0; i < 512; i += 4) {
         uint32_t v = read32(EMMC + 0x20);
+        __asm__ volatile("dsb sy" ::: "memory");
         out[i] = v; out[i + 1] = v >> 8;
         out[i + 2] = v >> 16; out[i + 3] = v >> 24;
     }
-    write32(EMMC + 0x30, 0x20);
+    hex("SDHCI block size/count after FIFO", read32(EMMC + 0x04));
+    hex("SDHCI present after FIFO", read32(EMMC + 0x24));
+    hex("FIFO first word", (uint32_t)out[0] | (uint32_t)out[1] << 8 |
+        (uint32_t)out[2] << 16 | (uint32_t)out[3] << 24);
+    if (cmd == 8) {
+        hex("EXT_CSD raw revision", out[192]);
+        hex("EXT_CSD raw sectors", (uint32_t)out[212] | (uint32_t)out[213] << 8 |
+            (uint32_t)out[214] << 16 | (uint32_t)out[215] << 24);
+    }
     if (wait_status(2)) goto done;
     write32(EMMC + 0x30, 2);
     rc = 0;
@@ -177,13 +199,13 @@ void secondary_main(uint64_t idx)
         hex("executing MPIDR", RSR("mpidr_el1"));
         hex("executing TGran16", (RSR("id_aa64mmfr0_el1") >> 20) & 15);
         emmc_probe();
-        puts_uart("PROBE 2 COMPLETE; waiting for hardware reset\n");
+        puts_uart("PROBE 3 COMPLETE; waiting for hardware reset\n");
         for (;;) __asm__ volatile("wfe");
     }
 }
 void shim_main(uint64_t dtb)
 {
-    puts_uart("\nGM9PRO SHIM PROBE 2\n");
+    puts_uart("\nGM9PRO SHIM PROBE 3\n");
     hex("CurrentEL", RSR("CurrentEL"));
     hex("DTB", dtb);
     hex("SCTLR_EL1", RSR("sctlr_el1"));
