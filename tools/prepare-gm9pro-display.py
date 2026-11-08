@@ -23,6 +23,8 @@ static volatile uint32_t *gm9_mdp_intr_status;
 static volatile uint32_t *gm9_mdp_intr_clear;
 static volatile uint32_t *gm9_mdp_ctl_start;
 static volatile uint32_t *gm9_mdp_vig;
+static volatile uint32_t *gm9_dsi;
+static volatile uint32_t *gm9_ctl;
 static unsigned gm9_trace_count;
 static unsigned gm9_trace_samples;
 static uint64_t gm9_trace_deadline;
@@ -56,6 +58,9 @@ gm9pro_display_init(uint64_t fb, uint32_t width, uint32_t height, uint32_t strid
     gm9_mdp_intr_clear = (volatile uint32_t *)(intr + 0x18);
     gm9_mdp_ctl_start = (volatile uint32_t *)(ctl + 0x1c);
     gm9_mdp_vig = pipe;
+    gm9_ctl = (volatile uint32_t *)ctl;
+    /* SDM660 DSI0, confirmed by sdm660-mdss.dtsi. Status reads only. */
+    gm9_dsi = (volatile uint32_t *)ml_io_map(0x0c994000, 0x1000);
     gm9_mdp_ready = true;
     printf("GM9 MDP: ABL VIG0 verified; command-mode page flips enabled\n");
 }
@@ -129,6 +134,18 @@ gm9pro_display_trace(uint64_t src, uint64_t dst, uint32_t ss, uint32_t ds,
     if (gm9_mdp_ready) printf("GM9 SCANOUT %u: address=%08x stride=%u format=%08x unpack=%08x intr=%08x\n",
         frame, gm9_mdp_vig[0x14/4], gm9_mdp_vig[0x24/4], gm9_mdp_vig[0x30/4],
         gm9_mdp_vig[0x34/4], *gm9_mdp_intr_status);
+    if (gm9_mdp_ready) printf("GM9 CTL %u: top=%08x flush=%08x start=%08x\n",
+        frame, gm9_ctl[0x14/4], gm9_ctl[0x18/4], gm9_ctl[0x1c/4]);
+    /* Offsets follow mdss_dsi_host.c. Do not acknowledge latched errors. */
+    if (gm9_dsi) {
+        printf("GM9 DSI %u: ctrl=%08x status=%08x fifo=%08x ack=%08x timeout=%08x clk=%08x\n",
+            frame, gm9_dsi[0x04/4], gm9_dsi[0x08/4], gm9_dsi[0x0c/4],
+            gm9_dsi[0x68/4], gm9_dsi[0xc0/4], gm9_dsi[0x120/4]);
+        printf("GM9 DSI-LANE %u: status=%08x ctrl=%08x intr=%08x\n",
+            frame, gm9_dsi[0xa8/4], gm9_dsi[0xac/4], gm9_dsi[0x110/4]);
+    }
+    /* Later samples retain hashes and register state without 48 UART lines. */
+    if (frame > 2) return;
     /* 32x48 RGB brightness samples from the destination, enough to identify a logo. */
     static const char hex[] = "0123456789abcdef";
     for (uint32_t gy = 0; gy < 48; gy++) {
