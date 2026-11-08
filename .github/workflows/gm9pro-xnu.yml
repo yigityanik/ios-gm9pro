@@ -50,7 +50,7 @@ jobs:
           # Bring up the measured GM9 framebuffer and MobileFramebuffer path;
           # do not enable the unrelated Pixel GPU, RPM, touch or Wi-Fi drivers.
           for p in Path('xnu/patches').iterdir():
-              selected = {20, 21, 22, 23, 24, 25, 26, 27, 29, 32, 33, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 51}
+              selected = {20, 21, 22, 23, 24, 25, 26, 27, 29, 32, 33, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 48, 49, 50, 51, 52, 53, 57}
               if p.suffix in ('.patch', '.sh') and (int(p.name[:4]) <= 19 or int(p.name[:4]) in selected or p.name == '0080-sweet-armv8.0-baseline.patch'):
                   shutil.copyfile(p, Path('dxb/patches') / p.name)
                   if p.name == '0043-sweet-console-crash-log.patch':
