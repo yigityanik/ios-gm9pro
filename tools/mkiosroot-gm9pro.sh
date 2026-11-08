@@ -88,6 +88,10 @@ done
 mkdir -p "$r/dev" "$r/private/var/run" "$r/private/var/db"
 mkdir -p "$r/private/tmp" "$r/private/var/tmp"
 chmod 1777 "$r/private/tmp" "$r/private/var/tmp"
+# iOS normally creates these on its data volume; this HFS root has one volume.
+install -d -m 0755 -o 0 -g 0 "$r/private/var/containers/Data/System" \
+    "$r/private/var/containers/Shared/SystemGroup" "$r/private/var/containers/Temp"
+install -d -m 0755 -o 33 -g 33 "$r/private/var/containers/Bundle"
 # Match the existing experimental no-passcode KeyStore test setup. This is
 # only a placeholder for bring-up, not a real SEP-protected system keybag.
 install -d -m 0700 -o 0 -g 0 "$r/private/var/keybags"
