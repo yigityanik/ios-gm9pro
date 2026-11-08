@@ -22,6 +22,8 @@ static LCK_MTX_DECLARE(gm9_mdp_lock, &gm9_mdp_group);
 static volatile uint32_t *gm9_mdp_intr_status;
 static volatile uint32_t *gm9_mdp_intr_clear;
 static volatile uint32_t *gm9_mdp_ctl_start;
+static volatile uint32_t *gm9_mdp_vig;
+static unsigned gm9_trace_count;
 static bool gm9_mdp_ready;
 static bool gm9_mdp_pending = true; /* ABL may have left a frame in flight. */
 static bool gm9_mdp_timeout_logged;
@@ -51,6 +53,7 @@ gm9pro_display_init(uint64_t fb, uint32_t width, uint32_t height, uint32_t strid
     gm9_mdp_intr_status = (volatile uint32_t *)(intr + 0x14);
     gm9_mdp_intr_clear = (volatile uint32_t *)(intr + 0x18);
     gm9_mdp_ctl_start = (volatile uint32_t *)(ctl + 0x1c);
+    gm9_mdp_vig = pipe;
     gm9_mdp_ready = true;
     printf("GM9 MDP: ABL VIG0 verified; command-mode page flips enabled\n");
 }
@@ -96,6 +99,45 @@ gm9pro_display_end_frame(void)
         lck_mtx_unlock(&gm9_mdp_lock);
     }
 }
+
+/* Bounded snapshots; a producer may still modify its source concurrently. */
+void
+gm9pro_display_trace(uint64_t src, uint64_t dst, uint32_t ss, uint32_t ds,
+    uint32_t width, uint32_t height)
+{
+    if (!width || !height || gm9_trace_count >= 2) return;
+    unsigned frame = ++gm9_trace_count;
+    uint32_t sh = 2166136261U, dh = 2166136261U, different = 0;
+    __asm__ volatile("dsb sy" ::: "memory");
+    for (uint32_t y = 0; y < height; y++) {
+        volatile uint32_t *s = (volatile uint32_t *)(uintptr_t)(src + (uint64_t)y * ss);
+        volatile uint32_t *d = (volatile uint32_t *)(uintptr_t)(dst + (uint64_t)y * ds);
+        for (uint32_t x = 0; x < width; x++) {
+            uint32_t a = s[x], b = d[x];
+            sh = (sh ^ a) * 16777619U; dh = (dh ^ b) * 16777619U;
+            different += a != b;
+        }
+    }
+    printf("GM9 PIXELS %u: %ux%u src-stride=%u dst-stride=%u src=%08x dst=%08x different=%u\n",
+        frame, width, height, ss, ds, sh, dh, different);
+    if (gm9_mdp_ready) printf("GM9 SCANOUT %u: address=%08x stride=%u format=%08x unpack=%08x intr=%08x\n",
+        frame, gm9_mdp_vig[0x14/4], gm9_mdp_vig[0x24/4], gm9_mdp_vig[0x30/4],
+        gm9_mdp_vig[0x34/4], *gm9_mdp_intr_status);
+    /* 32x48 RGB brightness samples from the destination, enough to identify a logo. */
+    static const char hex[] = "0123456789abcdef";
+    for (uint32_t gy = 0; gy < 48; gy++) {
+        char line[33];
+        uint32_t y = gy * (height - 1) / 47;
+        volatile uint32_t *d = (volatile uint32_t *)(uintptr_t)(dst + (uint64_t)y * ds);
+        for (uint32_t gx = 0; gx < 32; gx++) {
+            uint32_t p = d[gx * (width - 1) / 31];
+            unsigned luma = ((p & 255) + ((p >> 8) & 255) + ((p >> 16) & 255)) / 3;
+            line[gx] = hex[luma >> 4];
+        }
+        line[32] = 0;
+        printf("GM9 RASTER %u %u %s\n", frame, gy, line);
+    }
+}
 """
 
 display_path = source / "bsd/dev/gm9pro_display.c"
@@ -120,7 +162,8 @@ if s.count(class_marker) != 1:
     raise RuntimeError("AppleCLCD definition changed")
 s = s.replace(class_marker, class_marker + "\nextern \"C\" void gm9pro_display_init(uint64_t, uint32_t, uint32_t, uint32_t);"
               "\nextern \"C\" bool gm9pro_display_begin_frame(void);"
-              "\nextern \"C\" void gm9pro_display_end_frame(void);")
+              "\nextern \"C\" void gm9pro_display_end_frame(void);"
+              "\nextern \"C\" void gm9pro_display_trace(uint64_t, uint64_t, uint32_t, uint32_t, uint32_t, uint32_t);")
 quiet_marker = "\t\t\tPE_Video video;\n\t\t\tPE_current_console(&video);\n\t\t\tPE_initialize_console(&video, kPEDisableScreen);"
 if s.count(quiet_marker) != 1:
     raise RuntimeError("AppleCLCD console switch changed")
@@ -176,6 +219,13 @@ body = body.replace(crop_marker,
     "\t\tif (dy < 0) { sy -= dy; h += dy; dy = 0; }\n" + crop_marker)
 if not body.endswith("\t}\n"):
     raise RuntimeError("AppleCLCD::swap end changed")
+copy_end = "\t\t}\n\t\ts->release();"
+if body.count(copy_end) != 1:
+    raise RuntimeError("AppleCLCD copied layer end changed")
+body = body.replace(copy_end,
+    "\t\t\tgm9pro_display_trace(src + s->offset + (uint64_t)sy * s->bytesPerRow + (uint64_t)sx * 4,\n"
+    "\t\t\t    fPixels + (uint64_t)dy * fRowBytes + (uint64_t)dx * 4,\n"
+    "\t\t\t    s->bytesPerRow, fRowBytes, (uint32_t)w, (uint32_t)h);\n" + copy_end)
 body += "\tif (mdp_frame) {\n\t\tgm9pro_display_end_frame();\n\t}\n"
 s = s[:body_start] + body + s[body_end:]
 framebuffer.write_text(s)
