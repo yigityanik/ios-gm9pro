@@ -24,7 +24,7 @@ static int gm9_bmajor = -1, gm9_cmajor = -1;
 static bool gm9_ready, gm9_failed;
 static bool gm9_write_enabled, gm9_write_failed, gm9_write_safe;
 /* A bounded sector overlay for diagnostics; never writes the physical card. */
-#define GM9_COW_SLOTS 16384U
+#define GM9_COW_SLOTS 65536U
 static bool gm9_cow_enabled;
 static uint32_t gm9_cow_keys[GM9_COW_SLOTS]; /* relative sector + 1; 0 = empty */
 static uint8_t gm9_cow_data[GM9_COW_SLOTS][512];

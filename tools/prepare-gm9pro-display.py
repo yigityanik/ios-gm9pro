@@ -121,6 +121,10 @@ if s.count(class_marker) != 1:
 s = s.replace(class_marker, class_marker + "\nextern \"C\" void gm9pro_display_init(uint64_t, uint32_t, uint32_t, uint32_t);"
               "\nextern \"C\" bool gm9pro_display_begin_frame(void);"
               "\nextern \"C\" void gm9pro_display_end_frame(void);")
+quiet_marker = "\t\t\tPE_Video video;\n\t\t\tPE_current_console(&video);\n\t\t\tPE_initialize_console(&video, kPEDisableScreen);"
+if s.count(quiet_marker) != 1:
+    raise RuntimeError("AppleCLCD console switch changed")
+s = s.replace(quiet_marker, "\t\t\tPE_initialize_console(NULL, kPEGraphicsMode);")
 
 init_marker = "\tfRowBytes = (uint32_t)video.v_rowBytes;\n"
 if s.count(init_marker) != 1:

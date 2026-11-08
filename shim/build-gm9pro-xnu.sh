@@ -40,6 +40,9 @@ esac
 if [[ "${GM9PRO_SHOW_PROGRESS:-0}" == 1 ]]; then
     cmdline=${cmdline/ -noprogress/}
 fi
+if [[ "${GM9PRO_QUIET_FB:-0}" == 1 ]]; then
+    cmdline+=" sweetfb_noconsole=1"
+fi
 python3 ../tools/mkpayload.py "$kernel" out/gm9pro-xnu/gm9pro.adt out/gm9pro-xnu/payload \
     --cmdline "$cmdline" "${args[@]}"
 cc=${CROSS_COMPILE:-aarch64-linux-gnu-}
