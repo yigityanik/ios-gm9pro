@@ -24,6 +24,8 @@ static volatile uint32_t *gm9_mdp_intr_clear;
 static volatile uint32_t *gm9_mdp_ctl_start;
 static volatile uint32_t *gm9_mdp_vig;
 static unsigned gm9_trace_count;
+static unsigned gm9_trace_samples;
+static uint64_t gm9_trace_deadline;
 static bool gm9_mdp_ready;
 static bool gm9_mdp_pending = true; /* ABL may have left a frame in flight. */
 static bool gm9_mdp_timeout_logged;
@@ -105,8 +107,12 @@ void
 gm9pro_display_trace(uint64_t src, uint64_t dst, uint32_t ss, uint32_t ds,
     uint32_t width, uint32_t height)
 {
-    if (!width || !height || gm9_trace_count >= 2) return;
+    if (!width || !height) return;
     unsigned frame = ++gm9_trace_count;
+    if (gm9_trace_samples >= 22) return;
+    if (frame > 2 && mach_absolute_time() < gm9_trace_deadline) return;
+    ++gm9_trace_samples;
+    clock_interval_to_deadline(30, NSEC_PER_SEC, &gm9_trace_deadline);
     uint32_t sh = 2166136261U, dh = 2166136261U, different = 0;
     __asm__ volatile("dsb sy" ::: "memory");
     for (uint32_t y = 0; y < height; y++) {
