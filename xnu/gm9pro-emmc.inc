@@ -23,9 +23,35 @@ static unsigned gm9_part_count;
 static int gm9_bmajor = -1, gm9_cmajor = -1;
 static bool gm9_ready, gm9_failed;
 static bool gm9_write_enabled, gm9_write_failed, gm9_write_safe;
+/* A bounded sector overlay for diagnostics; never writes the physical card. */
+#define GM9_COW_SLOTS 16384U
+static bool gm9_cow_enabled;
+static uint32_t gm9_cow_keys[GM9_COW_SLOTS]; /* relative sector + 1; 0 = empty */
+static uint8_t gm9_cow_data[GM9_COW_SLOTS][512];
+static unsigned gm9_cow_count;
 static unsigned gm9_userdata;
 static LCK_GRP_DECLARE(gm9_emmc_group, "gm9_emmc");
 static LCK_MTX_DECLARE(gm9_emmc_lock, &gm9_emmc_group);
+
+/* Called with gm9_emmc_lock held. Userdata is below 2^32 sectors. */
+static int
+gm9_cow_slot(uint32_t block, bool create)
+{
+    uint32_t key = block + 1U;
+    if (!key) return -1;
+    uint32_t slot = (block * 2654435761U) & (GM9_COW_SLOTS - 1U);
+    for (unsigned n = 0; n < GM9_COW_SLOTS; n++) {
+        if (gm9_cow_keys[slot] == key) return (int)slot;
+        if (!gm9_cow_keys[slot]) {
+            if (!create) return -1;
+            gm9_cow_keys[slot] = key;
+            gm9_cow_count++;
+            return (int)slot;
+        }
+        slot = (slot + 1U) & (GM9_COW_SLOTS - 1U);
+    }
+    return -1;
+}
 
 static uint64_t
 gm9_le64(const uint8_t *p)
@@ -146,7 +172,7 @@ static int
 gm9_open(dev_t dev, int flags, __unused int type, __unused struct proc *p)
 {
     if (!gm9_partition(dev)) return ENXIO;
-    return (flags & FWRITE) && (!gm9_write_enabled || gm9_write_failed ||
+    return (flags & FWRITE) && ((!gm9_write_enabled && !gm9_cow_enabled) || gm9_write_failed ||
         minor(dev) != gm9_userdata) ? EROFS : 0;
 }
 
@@ -168,7 +194,7 @@ gm9_strategy(buf_t bp)
     buf_setresid(bp, count);
     bool writing = !(buf_flags(bp) & B_READ);
     if (!part) { error = ENXIO; goto done; }
-    if (writing && (!gm9_write_enabled || gm9_write_failed ||
+    if (writing && ((!gm9_write_enabled && !gm9_cow_enabled) || gm9_write_failed ||
         minor(buf_device(bp)) != gm9_userdata)) { error = EROFS; goto done; }
     if (block < 0 || count % 512 || (uint64_t)block > part->sectors ||
         count / 512 > part->sectors - (uint64_t)block) {
@@ -179,6 +205,28 @@ gm9_strategy(buf_t bp)
     lck_mtx_lock(&gm9_emmc_lock);
     while (completed < count) {
         uint64_t lba = part->first + (uint64_t)block + completed / 512;
+        if (gm9_cow_enabled && minor(buf_device(bp)) == gm9_userdata) {
+            uint64_t rel = (uint64_t)block + completed / 512;
+            if (rel >= 0xffffffffULL) { error = EINVAL; break; }
+            int slot = gm9_cow_slot((uint32_t)rel, writing);
+            if (writing) {
+                if (slot < 0) {
+                    printf("GM9 eMMC: RAM overlay full (%u sectors); refusing writes\n", gm9_cow_count);
+                    gm9_write_failed = true;
+                    error = ENOSPC;
+                    break;
+                }
+                memcpy(gm9_cow_data[slot], (uint8_t *)address + completed, 512);
+            } else if (slot >= 0) {
+                memcpy((uint8_t *)address + completed, gm9_cow_data[slot], 512);
+            } else if (read_block(17, (uint32_t)lba, (uint8_t *)address + completed)) {
+                error = EIO;
+                break;
+            }
+            completed += 512;
+            buf_setresid(bp, count - completed);
+            continue;
+        }
         int sent = 0;
         if ((writing && (gm9_write_failed || wp_write_one((uint32_t)lba,
                 (uint8_t *)address + completed, &sent))) ||
@@ -207,10 +255,10 @@ gm9_ioctl(dev_t dev, u_long command, caddr_t data, __unused int flag,
     case DKIOCGETPHYSICALBLOCKSIZE: *(uint32_t *)data = 512; return 0;
     case DKIOCSETBLOCKSIZE: return *(uint32_t *)data == 512 ? 0 : EINVAL;
     case DKIOCGETBLOCKCOUNT: *(uint64_t *)data = part->sectors; return 0;
-    case DKIOCISWRITABLE: *(uint32_t *)data = gm9_write_enabled &&
+    case DKIOCISWRITABLE: *(uint32_t *)data = (gm9_write_enabled || gm9_cow_enabled) &&
         !gm9_write_failed && minor(dev) == gm9_userdata; return 0;
     case DKIOCGETMAXBLOCKCOUNTREAD: *(uint64_t *)data = 128; return 0;
-    case DKIOCGETMAXBLOCKCOUNTWRITE: *(uint64_t *)data = gm9_write_enabled &&
+    case DKIOCGETMAXBLOCKCOUNTWRITE: *(uint64_t *)data = (gm9_write_enabled || gm9_cow_enabled) &&
         !gm9_write_failed && minor(dev) == gm9_userdata ? 1 : 0; return 0;
     default: return ENOTTY;
     }
@@ -233,7 +281,7 @@ static int
 gm9_write(dev_t dev, struct uio *uio, __unused int flags)
 {
     if (!gm9_partition(dev)) return ENXIO;
-    if (!gm9_write_enabled || gm9_write_failed || minor(dev) != gm9_userdata)
+    if ((!gm9_write_enabled && !gm9_cow_enabled) || gm9_write_failed || minor(dev) != gm9_userdata)
         return EROFS;
     return physio(gm9_strategy, NULL, dev, B_WRITE, minphys, uio, 512);
 }
@@ -262,8 +310,12 @@ gm9_disk_init(void)
     int error = gm9_read_gpt();
     if (error) return error;
     unsigned int requested = 0;
+    gm9_cow_enabled = PE_parse_boot_argn("gm9cow", &requested, sizeof(requested)) &&
+        requested == 1 && gm9_userdata;
+    requested = 0;
     gm9_write_enabled = PE_parse_boot_argn("gm9rw", &requested, sizeof(requested)) &&
-        requested == 1 && gm9_write_safe && gm9_userdata;
+        requested == 1 && gm9_write_safe && gm9_userdata && !gm9_cow_enabled;
+    if (gm9_cow_enabled) printf("GM9 eMMC: RAM overlay enabled (%u sectors); physical writes disabled\n", GM9_COW_SLOTS);
     printf("GM9 eMMC: userdata writes %s (cache/CMDQ/WP safe=%d)\n",
         gm9_write_enabled ? "enabled" : "disabled", gm9_write_safe);
     gm9_bmajor = bdevsw_add(-1, &gm9_bdevsw);
@@ -279,7 +331,7 @@ gm9_disk_init(void)
         char name[24];
         if (i) snprintf(name, sizeof(name), "emmc0s%u", i);
         else strlcpy(name, "emmc0", sizeof(name));
-        int mode = gm9_write_enabled && i == gm9_userdata ? 0640 : 0440;
+        int mode = (gm9_write_enabled || gm9_cow_enabled) && i == gm9_userdata ? 0640 : 0440;
         if (!devfs_make_node(makedev(gm9_bmajor, i), DEVFS_BLOCK,
             UID_ROOT, GID_OPERATOR, mode, "%s", name) ||
             !devfs_make_node(makedev(gm9_cmajor, i), DEVFS_CHAR,

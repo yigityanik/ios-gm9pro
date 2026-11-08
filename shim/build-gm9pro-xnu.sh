@@ -24,7 +24,12 @@ case "${GM9PRO_BOOT_MODE:-ram}" in
         cmdline="debug=0x14e serial=3 cpus=1 keepsyms=1 -noprogress rd=emmcroot0 emmcroot=$part unentitled_ios_sim_launch=1 ignition_level=1"
         if [[ "${GM9PRO_ENABLE_WRITES:-0}" == 1 ]]; then
             [[ "$part" == userdata ]] || { echo 'Writes are limited to userdata' >&2; exit 1; }
+            [[ "${GM9PRO_COW:-0}" != 1 ]] || { echo 'COW and physical writes cannot both be requested' >&2; exit 1; }
             cmdline+=" gm9rw=1"
+        fi
+        if [[ "${GM9PRO_COW:-0}" == 1 ]]; then
+            [[ "$part" == userdata ]] || { echo 'COW is limited to userdata' >&2; exit 1; }
+            cmdline+=" gm9cow=1"
         fi
         if [[ "${GM9PRO_UNSECURE_LAUNCHD_CACHE:-0}" == 1 ]]; then
             cmdline+=" launchd_unsecure_cache=1"
@@ -32,6 +37,9 @@ case "${GM9PRO_BOOT_MODE:-ram}" in
         ;;
     *) echo 'GM9PRO_BOOT_MODE must be ram or emmc' >&2; exit 1 ;;
 esac
+if [[ "${GM9PRO_SHOW_PROGRESS:-0}" == 1 ]]; then
+    cmdline=${cmdline/ -noprogress/}
+fi
 python3 ../tools/mkpayload.py "$kernel" out/gm9pro-xnu/gm9pro.adt out/gm9pro-xnu/payload \
     --cmdline "$cmdline" "${args[@]}"
 cc=${CROSS_COMPILE:-aarch64-linux-gnu-}
