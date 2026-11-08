@@ -109,6 +109,12 @@ if entry not in files_text:
 
 framebuffer = source / "iokit/Kernel/arm/SweetFramebuffer.cpp"
 s = framebuffer.read_text()
+field_marker = "\tuint32_t      fWidth, fHeight, fRowBytes;\n"
+if s.count(field_marker) != 1:
+    raise RuntimeError("AppleCLCD geometry fields changed")
+s = s.replace(field_marker, field_marker +
+              "\tuint32_t      fLogicalW, fLogicalH;\n"
+              "\tint32_t       fOffX, fOffY;\n")
 class_marker = "OSDefineMetaClassAndStructors(AppleCLCD, IOMobileFramebuffer);"
 if s.count(class_marker) != 1:
     raise RuntimeError("AppleCLCD definition changed")
@@ -119,7 +125,19 @@ s = s.replace(class_marker, class_marker + "\nextern \"C\" void gm9pro_display_i
 init_marker = "\tfRowBytes = (uint32_t)video.v_rowBytes;\n"
 if s.count(init_marker) != 1:
     raise RuntimeError("AppleCLCD boot framebuffer setup changed")
-s = s.replace(init_marker, init_marker + "\tgm9pro_display_init(fPhys, fWidth, fHeight, fRowBytes);\n")
+s = s.replace(init_marker, init_marker +
+    "\tgm9pro_display_init(fPhys, fWidth, fHeight, fRowBytes);\n"
+    "\tfLogicalW = fWidth; fLogicalH = fHeight;\n"
+    "\tif (fWidth == 1080 && fHeight == 2160) {\n"
+    "\t\tfLogicalW = 1125; fLogicalH = 2436;\n"
+    "\t}\n"
+    "\tfOffX = (int32_t)(fLogicalW - fWidth) / 2;\n"
+    "\tfOffY = (int32_t)(fLogicalH - fHeight) / 2;\n")
+
+size_marker = "\tcase kSweetFBGetDisplaySize:\n\t\tout[0] = fFB->fWidth;\n\t\tout[1] = fFB->fHeight;"
+if s.count(size_marker) != 1:
+    raise RuntimeError("AppleCLCD display size selector changed")
+s = s.replace(size_marker, "\tcase kSweetFBGetDisplaySize:\n\t\tout[0] = fFB->fLogicalW;\n\t\tout[1] = fFB->fLogicalH;")
 
 method = "AppleCLCD::swap(const uint8_t *rec)"
 match = re.search(re.escape(method) + r"\s*\{", s)
@@ -144,6 +162,14 @@ body = body.replace(mask_line, mask_line +
     "\t\t\treturn;\n"
     "\t\t}\n"
     "\t}\n")
+crop_marker = "\t\tif (w > (int32_t)s->width - sx) {\n"
+if body.count(crop_marker) != 1:
+    raise RuntimeError("AppleCLCD swap bounds changed")
+body = body.replace(crop_marker,
+    "\t\t/* Center the logical iPhone X surface on the physical panel. */\n"
+    "\t\tdx -= fOffX; dy -= fOffY;\n"
+    "\t\tif (dx < 0) { sx -= dx; w += dx; dx = 0; }\n"
+    "\t\tif (dy < 0) { sy -= dy; h += dy; dy = 0; }\n" + crop_marker)
 if not body.endswith("\t}\n"):
     raise RuntimeError("AppleCLCD::swap end changed")
 body += "\tif (mdp_frame) {\n\t\tgm9pro_display_end_frame();\n\t}\n"
