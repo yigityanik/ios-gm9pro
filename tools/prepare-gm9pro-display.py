@@ -16,6 +16,9 @@ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
 
 #define GM9_MDP_PP0_DONE (1U << 8)
 #define GM9_MDP_WAIT_MS 50
+#define GM9_DSI_MDP_DONE (1U << 8)
+/* mdss_dsi.h: enable/mask bits only; never echo other W1C status bits. */
+#define GM9_DSI_INTR_MASK_ALL 0xa2220202U
 
 static LCK_GRP_DECLARE(gm9_mdp_group, "gm9_mdp");
 static LCK_MTX_DECLARE(gm9_mdp_lock, &gm9_mdp_group);
@@ -31,6 +34,14 @@ static uint64_t gm9_trace_deadline;
 static bool gm9_mdp_ready;
 static bool gm9_mdp_pending = true; /* ABL may have left a frame in flight. */
 static bool gm9_mdp_timeout_logged;
+static bool gm9_mdp_failed;
+
+static bool
+gm9pro_display_done(void)
+{
+    return (*gm9_mdp_intr_status & GM9_MDP_PP0_DONE) &&
+        (!gm9_dsi || (gm9_dsi[0x110/4] & GM9_DSI_MDP_DONE));
+}
 
 void
 gm9pro_display_init(uint64_t fb, uint32_t width, uint32_t height, uint32_t stride)
@@ -73,18 +84,25 @@ gm9pro_display_begin_frame(void)
         return true; /* Preserve the software framebuffer path if handoff is absent. */
     }
     lck_mtx_lock(&gm9_mdp_lock);
+    if (gm9_mdp_failed) {
+        lck_mtx_unlock(&gm9_mdp_lock);
+        return false;
+    }
     if (gm9_mdp_pending) {
         uint64_t deadline;
         clock_interval_to_deadline(GM9_MDP_WAIT_MS, NSEC_PER_MSEC, &deadline);
-        while (!(*gm9_mdp_intr_status & GM9_MDP_PP0_DONE) &&
+        while (!gm9pro_display_done() &&
             mach_absolute_time() < deadline) {
             delay(100);
         }
-        if (!(*gm9_mdp_intr_status & GM9_MDP_PP0_DONE)) {
+        if (!gm9pro_display_done()) {
             if (!gm9_mdp_timeout_logged) {
                 gm9_mdp_timeout_logged = true;
-                printf("GM9 MDP: previous frame timed out; dropping framebuffer swap\n");
+                printf("GM9 MDP: transfer completion timed out intr=%08x dsi=%08x status=%08x fifo=%08x; stopping scanout updates\n",
+                    *gm9_mdp_intr_status, gm9_dsi ? gm9_dsi[0x110/4] : 0,
+                    gm9_dsi ? gm9_dsi[0x08/4] : 0, gm9_dsi ? gm9_dsi[0x0c/4] : 0);
             }
+            gm9_mdp_failed = true;
             lck_mtx_unlock(&gm9_mdp_lock);
             return false;
         }
@@ -98,8 +116,21 @@ void
 gm9pro_display_end_frame(void)
 {
     if (gm9_mdp_ready) {
+        if (gm9_dsi) {
+            uint32_t masks = gm9_dsi[0x110/4] & GM9_DSI_INTR_MASK_ALL;
+            gm9_dsi[0x110/4] = masks | GM9_DSI_MDP_DONE;
+        }
         *gm9_mdp_intr_clear = GM9_MDP_PP0_DONE;
         __asm__ volatile("dsb sy" ::: "memory");
+        /* A stale DONE must not make the next wait succeed immediately. */
+        if ((*gm9_mdp_intr_status & GM9_MDP_PP0_DONE) ||
+            (gm9_dsi && (gm9_dsi[0x110/4] & GM9_DSI_MDP_DONE))) {
+            printf("GM9 MDP: completion did not clear intr=%08x dsi=%08x; stopping scanout updates\n",
+                *gm9_mdp_intr_status, gm9_dsi ? gm9_dsi[0x110/4] : 0);
+            gm9_mdp_failed = true;
+            lck_mtx_unlock(&gm9_mdp_lock);
+            return;
+        }
         *gm9_mdp_ctl_start = 1;
         __asm__ volatile("dsb sy" ::: "memory");
         gm9_mdp_pending = true;
