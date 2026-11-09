@@ -104,7 +104,7 @@ cd shim
 cc=${CROSS_COMPILE:-aarch64-linux-gnu-}
 flags=(-O2 -ffreestanding -nostdlib -fno-pic -mgeneral-regs-only -mstrict-align -fno-stack-protector -Wall -Wextra -Werror -Wno-unused-function -DGM9PRO_ENTRY_TRACE)
 "${cc}gcc" "${flags[@]}" -c out/gm9pro-display/start.S -o out/gm9pro-display/start.o
-"${cc}gcc" "${flags[@]}" -c out/gm9pro-display/probe.c -o out/gm9pro-display/probe.o
+"${cc}gcc" "${flags[@]}" -I. -c out/gm9pro-display/probe.c -o out/gm9pro-display/probe.o
 "${cc}gcc" "${flags[@]}" -static -T shim.ld -Wl,--build-id=none -Wl,--no-warn-rwx-segments -Wl,-N out/gm9pro-display/start.o out/gm9pro-display/probe.o -o out/gm9pro-display/probe.elf
 "${cc}objcopy" -O binary out/gm9pro-display/probe.elf out/gm9pro-display/Image
 python3 ../tools/mkboot-gm9pro.py "$stock" out/gm9pro-display/Image out/gm9pro-display/gm9pro-display-test.img

@@ -214,6 +214,9 @@ static int64_t cpu_on(uint64_t target, uint64_t idx)
     __asm__ volatile("dsb sy; smc #0" : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3) : : "x4", "x5", "x6", "x7", "memory");
     return (int64_t)x0;
 }
+#ifdef GM9PRO_XNU_LOADER
+#include "gm9pro-display-takeover.inc"
+#endif
 void secondary_main(uint64_t idx)
 {
     if (idx >= 8) return;
@@ -229,6 +232,13 @@ void secondary_main(uint64_t idx)
         hex("executing MPIDR", RSR("mpidr_el1"));
         hex("executing TGran16", (RSR("id_aa64mmfr0_el1") >> 20) & 15);
 #ifdef GM9PRO_XNU_LOADER
+        if (read32(0x0c905000UL) != 0x08700438U ||
+            read32(0x0c905014UL) != 0x9d400000U ||
+            read32(0x0c905024UL) != 4320 ||
+            !display_manual_takeover(0x0c901014UL)) {
+            puts_uart("Display takeover failed; XNU entry cancelled\n");
+            for (;;) __asm__ volatile("wfe");
+        }
         const char *error = loader_boot_rd((uintptr_t)_end,
             (uintptr_t)_end + PAYLOAD_BYTES);
         puts_uart("XNU loader returned: "); puts_uart(error); puts_uart("\n");
