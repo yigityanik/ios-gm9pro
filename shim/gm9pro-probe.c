@@ -212,14 +212,16 @@ static int64_t affinity_info(uint64_t target)
     register uint64_t x1 __asm__("x1") = target;
     register uint64_t x2 __asm__("x2") = 0;
     __asm__ volatile("smc #0" : "+r"(x0), "+r"(x1), "+r"(x2) : :
-        "x3", "x4", "x5", "x6", "x7", "memory");
+        "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11",
+        "x12", "x13", "x14", "x15", "x16", "x17", "memory");
     return (int64_t)x0;
 }
 static void cpu_off(void)
 {
     register uint64_t x0 __asm__("x0") = 0x84000002;
     __asm__ volatile("dsb sy; smc #0" : "+r"(x0) : :
-        "x1", "x2", "x3", "x4", "x5", "x6", "x7", "memory");
+        "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11",
+        "x12", "x13", "x14", "x15", "x16", "x17", "memory");
     puts_uart("PSCI CPU_OFF returned; refusing XNU handoff\n");
     for (;;) __asm__ volatile("wfe");
 }
@@ -230,7 +232,8 @@ static int64_t cpu_on(uint64_t target, uint64_t idx)
     register uint64_t x1 __asm__("x1") = target;
     register uint64_t x2 __asm__("x2") = (uintptr_t)secondary_entry;
     register uint64_t x3 __asm__("x3") = idx;
-    __asm__ volatile("dsb sy; smc #0" : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3) : : "x4", "x5", "x6", "x7", "memory");
+    __asm__ volatile("dsb sy; smc #0" : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3) : : "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11",
+        "x12", "x13", "x14", "x15", "x16", "x17", "memory");
     return (int64_t)x0;
 }
 #ifdef GM9PRO_XNU_LOADER
