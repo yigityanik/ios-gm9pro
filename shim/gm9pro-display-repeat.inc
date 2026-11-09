@@ -1,52 +1,15 @@
-/* SDM660 MMSS SMMU: read-only inspection, no translation or fault changes. */
+/* Read MMCC prerequisites only; raw SMMU reads hung on the previous probe. */
 static void display_smmu_snapshot(void)
 {
-    const uintptr_t base = 0x0cd00000UL;
-    puts_uart("GM9 MMSS SMMU snapshot begin\n");
-    uint32_t id0 = read32(base + 0x20), id1 = read32(base + 0x24);
-    hex("SMMU ID0", id0);
-    hex("SMMU ID1", id1);
-    hex("SMMU CR0", read32(base));
-    hex("SMMU GFSR", read32(base + 0x48));
-    hex("SMMU GFSYNR0", read32(base + 0x50));
-    hex("SMMU GFSYNR1", read32(base + 0x54));
-    unsigned groups = id0 & 255, banks = id1 & 255;
-    unsigned shift = (id1 & (1U << 31)) ? 16 : 12;
-    if (!groups || groups > 128 || !banks || banks > 32) {
-        puts_uart("SMMU identification unavailable/unexpected; no bank reads\n");
-        return;
-    }
-    uint32_t used = 0;
-    for (unsigned i = 0; i < groups; i++) {
-        uint32_t smr = read32(base + 0x800 + i * 4);
-        if (!(smr & (1U << 31))) continue;
-        uint32_t s2cr = read32(base + 0xc00 + i * 4);
-        hex("SMMU stream index", i);
-        hex("SMMU SMR", smr);
-        hex("SMMU S2CR", s2cr);
-        /* MDP non-secure stream ID is 0 in sdm660-mdss.dtsi. */
-        uint32_t mask = (smr >> 16) & 0x7fff;
-        unsigned cb = s2cr & 255;
-        if (((smr & 0x7fff) & ~mask) == 0 &&
-            ((s2cr >> 16) & 3) == 0 && cb < banks) used |= 1U << cb;
-    }
-    for (unsigned cb = 0; cb < banks; cb++) {
-        if (!(used & (1U << cb))) continue;
-        uintptr_t off = 0x20000UL + ((uintptr_t)cb << shift);
-        /* DTS register window is 0x40000 bytes; never read outside it. */
-        if (off + 0x70 > 0x40000UL) continue;
-        uintptr_t bank = base + off;
-        hex("SMMU MDP candidate CB", cb);
-        hex("SMMU CB SCTLR", read32(bank));
-        hex("SMMU CB TTBR0 low", read32(bank + 0x20));
-        hex("SMMU CB TTBR0 high", read32(bank + 0x24));
-        hex("SMMU CB TTBCR", read32(bank + 0x30));
-        hex("SMMU CB FSR", read32(bank + 0x58));
-        hex("SMMU CB FAR low", read32(bank + 0x60));
-        hex("SMMU CB FAR high", read32(bank + 0x64));
-        hex("SMMU CB FSYNR0", read32(bank + 0x68));
-    }
-    puts_uart("GM9 MMSS SMMU snapshot end\n");
+    const uintptr_t mmcc = 0x0c8c0000UL;
+    puts_uart("GM9 MMSS clock snapshot begin; SMMU register reads disabled\n");
+    /* mmcc-sdm660.c and msm-gdsc-660.dtsi. No clock/power control writes. */
+    hex("MMSS SMMU AHB CBCR", read32(mmcc + 0xe004));
+    hex("MMSS SMMU AXI CBCR", read32(mmcc + 0xe008));
+    hex("MMSS MNOC AHB CBCR", read32(mmcc + 0x5024));
+    hex("MMSS SMMU GDSCR", read32(mmcc + 0xe020));
+    hex("MMSS SMMU HW CTRL", read32(mmcc + 0xe024));
+    puts_uart("GM9 MMSS clock snapshot end; translation unchanged\n");
 }
 
 /* Repeated scanout without XNU, using the inherited ABL configuration. */
