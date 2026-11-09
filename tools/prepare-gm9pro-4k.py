@@ -63,6 +63,12 @@ edit('osfmk/vm/vm_shared_region.c',
      'vm_map_set_page_shift(sub_map, SIXTEENK_PAGE_SHIFT);',
      'vm_map_set_page_shift(sub_map, FOURK_PAGE_SHIFT);')
 
+# The 4K low-globals region starts at -64 GiB, not VM_MIN_KERNEL_ADDRESS
+# (-128 GiB). Its L2 table already exists when the UART alias is installed.
+edit('osfmk/arm64/arm_vm_init.c',
+     '#define SWEET_EARLY_FB_VA (VM_MIN_KERNEL_ADDRESS + ARM_TT_L2_SIZE)',
+     '#define SWEET_EARLY_FB_VA (LOW_GLOBAL_BASE_ADDRESS + ARM_TT_L2_SIZE)')
+
 # Two roots, RAM L2 tables, and a separate UART L2 table. Clear the full pool.
 edit('osfmk/arm/pmap/pmap.h',
      '#define BOOTSTRAP_TABLE_SIZE (ARM_PGBYTES * 8)',
