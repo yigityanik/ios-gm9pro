@@ -5,6 +5,12 @@ stock=$(realpath "$1")
 kernel=$(realpath "$2")
 cd "$(dirname "$0")"
 mkdir -p out/gm9pro-xnu
+cpus=${GM9PRO_CPUS:-1}
+[[ "$cpus" == 1 || "$cpus" == 8 ]] || { echo 'GM9PRO_CPUS must be 1 or 8' >&2; exit 1; }
+if [[ "$cpus" == 8 && "${GM9PRO_KERNEL_4K:-0}" != 1 ]]; then
+    echo 'Eight CPUs require the separately built native 4 KiB kernel' >&2; exit 1
+fi
+export GM9PRO_CPUS="$cpus"
 python3 ../tools/mkadt-gm9pro.py out/gm9pro-xnu/gm9pro.adt
 init="$(dirname "$kernel")/gm9pro-init.bin"
 root="$(dirname "$kernel")/gm9pro-root.img"
@@ -43,11 +49,13 @@ fi
 if [[ "${GM9PRO_QUIET_FB:-0}" == 1 ]]; then
     cmdline+=" sweetfb_noconsole=1"
 fi
+cmdline=${cmdline/cpus=1/cpus=$cpus}
 python3 ../tools/mkpayload.py "$kernel" out/gm9pro-xnu/gm9pro.adt out/gm9pro-xnu/payload \
     --cmdline "$cmdline" "${args[@]}"
 cc=${CROSS_COMPILE:-aarch64-linux-gnu-}
 bytes=$(wc -c < out/gm9pro-xnu/payload)
 flags=(-O2 -ffreestanding -nostdlib -fno-pic -mgeneral-regs-only -mstrict-align -fno-stack-protector -Wall -Wextra -Werror -Wno-unused-function -DGM9PRO_ENTRY_TRACE -DGM9PRO_XNU_LOADER "-DPAYLOAD_BYTES=$bytes")
+if [[ "$cpus" == 8 ]]; then flags+=(-DGM9PRO_SMP_HANDOFF); fi
 objects=()
 for src in start.S gm9pro-probe.c gm9pro-console.c gm9pro-gic-prepare.c loader.c fdt.c; do
     obj="out/gm9pro-xnu/${src%.*}.o"

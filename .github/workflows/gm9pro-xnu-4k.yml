@@ -1,0 +1,106 @@
+name: GM9 Pro XNU 4K SMP test
+on:
+  push:
+    branches: [gm9pro]
+    paths:
+      - xnu/**
+      - tools/prepare-gm9pro.py
+      - tools/prepare-gm9pro-display.py
+      - tools/mkadt-gm9pro.py
+      - tools/mkroot-gm9pro.sh
+      - tools/gm9pro-init.S
+      - tools/mkinit.py
+      - shim/loader.c
+      - shim/gm9pro-probe.c
+      - tools/prepare-gm9pro-4k.py
+      - .github/workflows/gm9pro-xnu-4k.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: gm9pro-xnu-4k
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      MACOS_VERSION: '13.5'
+      KERNEL_CONFIG: DEVELOPMENT
+      MACHINE_CONFIG: SWEET
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare build tools
+        run: |
+          brew install jq gum bash cmake ninja
+          printf '#!/bin/sh\nexit 0\n' | sudo tee /usr/local/bin/xcodes >/dev/null
+          sudo chmod +x /usr/local/bin/xcodes
+          XC=/Applications/Xcode_16.4.app
+          test -d "$XC"
+          echo "DEVELOPER_DIR=$XC/Contents/Developer" >> "$GITHUB_ENV"
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+      - name: Prepare XNU sources
+        run: |
+          git init -q dxb
+          git -C dxb fetch -q --depth 1 https://github.com/blacktop/darwin-xnu-build 663906528d1cd5ea8fde7de6f16de73db9511549
+          git -C dxb checkout -q FETCH_HEAD
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          # Bring up the measured GM9 framebuffer and MobileFramebuffer path;
+          # do not enable the unrelated Pixel GPU, RPM, touch or Wi-Fi drivers.
+          for p in Path('xnu/patches').iterdir():
+              selected = {20, 21, 22, 23, 24, 25, 26, 27, 29, 32, 33, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 48, 49, 50, 51, 52, 53, 55, 57, 65, 78}
+              if p.suffix in ('.patch', '.sh') and (int(p.name[:4]) <= 19 or int(p.name[:4]) in selected or p.name == '0080-sweet-armv8.0-baseline.patch'):
+                  shutil.copyfile(p, Path('dxb/patches') / p.name)
+                  if p.name == '0055-sweet-aks-ext-state-sampler-depth.patch':
+                      target = Path('dxb/patches') / p.name
+                      content = target.read_text()
+                      # Keep the KeyStore fix; the process sampler is not built.
+                      marker = '--- a/osfmk/kern/exception.c'
+                      assert content.count(marker) == 1
+                      target.write_text(content.split(marker)[0])
+          p = Path('dxb/build.sh')
+          s = p.read_text()
+          old = 'ARCHS="x86_64 arm64e" VALID_ARCHS="x86_64 arm64e"'
+          assert old in s
+          s = s.replace(old, old + ' OTHER_CFLAGS=\'$(inherited) -mcpu=cortex-a53\'')
+          s = s.replace('ARCHS="x86_64 arm64e" VALID_ARCHS="x86_64 arm64e"',
+                        'ARCHS="arm64" VALID_ARCHS="arm64"')
+          assert s.count('    patches\n') == 1
+          s = s.replace('    patches\n', '    patches\n    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro.py" "$WORK_DIR/xnu"\n')
+          s = s.replace('    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro.py" "$WORK_DIR/xnu"\n',
+                        '    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro.py" "$WORK_DIR/xnu"\n    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro-display.py" "$WORK_DIR/xnu"\n    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro-4k.py" "$WORK_DIR/xnu"\n')
+          # Do not package a kernel after an unapplied device patch.
+          s = s.replace('                warning "Skipping patch ${PATCH}',
+                        '                if [[ "$(basename "$PATCH")" == 0[0-9][0-9][0-9]-* ]]; then echo "Device patch failed: $PATCH" >&2; exit 1; fi\n                warning "Skipping patch ${PATCH}')
+          p.write_text(s)
+          PY
+      - name: Prepare test root
+        run: |
+          mkdir -p out
+          clang -target arm64-apple-ios16.0 -c tools/gm9pro-init.S -o out/gm9pro-init.o
+          python3 tools/mkinit.py out/gm9pro-init.o out/gm9pro-init.bin
+          rm out/gm9pro-init.o
+          bash -x tools/mkroot-gm9pro.sh out/gm9pro-init.bin out/gm9pro-root.img
+      - name: Build kernel
+        working-directory: dxb
+        run: |
+          set -o pipefail
+          bash build.sh 2>&1 | tee "$GITHUB_WORKSPACE/gm9pro-build.log"
+      - name: Collect kernel
+        run: |
+          mkdir -p out
+          find dxb/fakeroot/System/Library/Kernels -type f -name '*sweet*' -exec cp {} out/ \;
+          test -n "$(find out -type f -name '*sweet*' -print -quit)"
+          shasum -a 256 out/* > out/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gm9pro-xnu-4k-kernel
+          path: out/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gm9pro-xnu-4k-build-log
+          path: gm9pro-build.log

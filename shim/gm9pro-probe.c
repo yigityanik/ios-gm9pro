@@ -205,6 +205,25 @@ static void emmc_probe(void)
         if (sector[i] != again[i]) { puts_uart("Repeated sector read differs\n"); return; }
     puts_uart("EMMC READ PASS: MBR, GPT header CRC and repeat read verified\n");
 }
+#ifdef GM9PRO_SMP_HANDOFF
+static int64_t affinity_info(uint64_t target)
+{
+    register uint64_t x0 __asm__("x0") = 0xc4000004;
+    register uint64_t x1 __asm__("x1") = target;
+    register uint64_t x2 __asm__("x2") = 0;
+    __asm__ volatile("smc #0" : "+r"(x0), "+r"(x1), "+r"(x2) : :
+        "x3", "x4", "x5", "x6", "x7", "memory");
+    return (int64_t)x0;
+}
+static void cpu_off(void)
+{
+    register uint64_t x0 __asm__("x0") = 0x84000002;
+    __asm__ volatile("dsb sy; smc #0" : "+r"(x0) : :
+        "x1", "x2", "x3", "x4", "x5", "x6", "x7", "memory");
+    puts_uart("PSCI CPU_OFF returned; refusing XNU handoff\n");
+    for (;;) __asm__ volatile("wfe");
+}
+#endif
 static int64_t cpu_on(uint64_t target, uint64_t idx)
 {
     register uint64_t x0 __asm__("x0") = 0xc4000003;
@@ -232,6 +251,21 @@ void secondary_main(uint64_t idx)
         hex("executing MPIDR", RSR("mpidr_el1"));
         hex("executing TGran16", (RSR("id_aa64mmfr0_el1") >> 20) & 15);
 #ifdef GM9PRO_XNU_LOADER
+#ifdef GM9PRO_SMP_HANDOFF
+        for (unsigned i = 0; i < 8; i++) {
+            if (i == 4) continue;
+            uint64_t aff = i < 4 ? i : 0x100 + i - 4;
+            uint64_t deadline = ticks() + freq();
+            while (affinity_info(aff) != 1) {
+                if (ticks() >= deadline) {
+                    puts_uart("SMP handoff: CPU did not power off\n");
+                    hex("CPU target", aff);
+                    for (;;) __asm__ volatile("wfe");
+                }
+            }
+        }
+        puts_uart("SMP handoff: seven secondary CPUs OFF\n");
+#endif
         if (read32(0x0c905000UL) != 0x08700438U ||
             read32(0x0c905014UL) != 0x9d400000U ||
             read32(0x0c905024UL) != 4320 ||
@@ -248,6 +282,9 @@ void secondary_main(uint64_t idx)
         puts_uart("PROBE 5 COMPLETE; waiting for hardware reset\n");
         for (;;) __asm__ volatile("wfe");
     }
+#ifdef GM9PRO_SMP_HANDOFF
+    cpu_off();
+#endif
 }
 void shim_main(uint64_t dtb)
 {
@@ -287,6 +324,9 @@ void shim_main(uint64_t dtb)
     puts_uart("Releasing big CPU 0x100; parking boot CPU\n");
     run_big = 1;
     __asm__ volatile("dsb sy; sev" ::: "memory");
+#ifdef GM9PRO_SMP_HANDOFF
+    cpu_off();
+#endif
     for (;;) __asm__ volatile("wfe");
 }
 void exc_handler(uint64_t slot, uint64_t *regs)
