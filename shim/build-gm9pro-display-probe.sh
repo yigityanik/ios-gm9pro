@@ -5,6 +5,7 @@ cd "$(dirname "$0")/.."
 mkdir -p shim/out/gm9pro-display
 python3 - <<'PY'
 from pathlib import Path
+import os
 
 s = Path('shim/gm9pro-probe.c').read_text()
 start = s.index('static void emmc_probe(void)')
@@ -81,6 +82,10 @@ s = s.replace('    hex("SDHCI present state", read32(EMMC + 0x24));\n'
 s = s.replace('        emmc_probe();', '        display_probe();')
 s = s.replace('PROBE 5 COMPLETE; waiting for hardware reset',
               'DISPLAY TEST COMPLETE; waiting for hardware reset')
+if os.environ.get('GM9PRO_DISPLAY_REPEAT') == '1':
+    begin = s.index('static void display_probe(void)')
+    end = s.index('static void emmc_probe(void)', begin)
+    s = s[:begin] + Path('shim/gm9pro-display-repeat.inc').read_text() + '\n' + s[end:]
 Path('shim/out/gm9pro-display/probe.c').write_text(s)
 PY
 cd shim
