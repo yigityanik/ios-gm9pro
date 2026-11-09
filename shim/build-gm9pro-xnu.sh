@@ -53,6 +53,24 @@ if [[ "${GM9PRO_QUIET_FB:-0}" == 1 ]]; then
     cmdline+=" sweetfb_noconsole=1"
 fi
 cmdline=${cmdline/cpus=1/cpus=$cpus}
+if [[ "${GM9PRO_KERNEL_4K:-0}" == 1 ]]; then
+    # The macOS default reserves 16x RAM for the compressor. That exceeds
+    # this non-large-memory kernel VA layout on the 4 GB device. Use the
+    # existing page-count tunable and the mobile five-swap-file limit.
+    compressor_pages=$(python3 - <<'PY'
+import struct
+import sys
+sys.path.insert(0, '../tools')
+import adt
+root, _ = adt.parse(open('out/gm9pro-xnu/gm9pro.adt', 'rb').read())
+chosen = next(n for n in root.children if n.name == 'chosen')
+size = struct.unpack('<Q', chosen.prop('dram-size'))[0]
+assert size > 0 and size % 4096 == 0
+print(size // 4096)
+PY
+    )
+    cmdline+=" vm_compression_limit=$compressor_pages vm_max_num_swap_files=5"
+fi
 python3 ../tools/mkpayload.py "$kernel" out/gm9pro-xnu/gm9pro.adt out/gm9pro-xnu/payload \
     --cmdline "$cmdline" "${args[@]}"
 cc=${CROSS_COMPILE:-aarch64-linux-gnu-}
