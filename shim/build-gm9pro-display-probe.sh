@@ -6,6 +6,7 @@ mkdir -p shim/out/gm9pro-display
 python3 - <<'PY'
 from pathlib import Path
 import os
+import re
 
 s = Path('shim/gm9pro-probe.c').read_text()
 start = s.index('static void emmc_probe(void)')
@@ -86,12 +87,23 @@ if os.environ.get('GM9PRO_DISPLAY_REPEAT') == '1':
     begin = s.index('static void display_probe(void)')
     end = s.index('static void emmc_probe(void)', begin)
     s = s[:begin] + Path('shim/gm9pro-display-repeat.inc').read_text() + '\n' + s[end:]
+    variant = int(os.environ.get('GM9PRO_DISPLAY_VARIANT', '0'))
+    if variant not in (0, 1, 2):
+        raise ValueError('Display variant must be 0, 1 or 2')
+    s = '#define GM9_DISPLAY_VARIANT %d\n' % variant + s
 Path('shim/out/gm9pro-display/probe.c').write_text(s)
+entry = Path('shim/start.S').read_text()
+# The separate 9 MiB buffer puts stacks beyond ADR's +/-1 MiB reach.
+entry, count = re.subn(r'adr\s+(x\d+),\s*(_stack_top|_bss_end|_sec_stacks)',
+    lambda m: 'adrp\t%s, %s\n\tadd\t%s, %s, :lo12:%s' %
+        (m[1], m[2], m[1], m[1], m[2]), entry)
+assert count == 3, 'Display probe entry layout changed'
+Path('shim/out/gm9pro-display/start.S').write_text(entry)
 PY
 cd shim
 cc=${CROSS_COMPILE:-aarch64-linux-gnu-}
 flags=(-O2 -ffreestanding -nostdlib -fno-pic -mgeneral-regs-only -mstrict-align -fno-stack-protector -Wall -Wextra -Werror -Wno-unused-function -DGM9PRO_ENTRY_TRACE)
-"${cc}gcc" "${flags[@]}" -c start.S -o out/gm9pro-display/start.o
+"${cc}gcc" "${flags[@]}" -c out/gm9pro-display/start.S -o out/gm9pro-display/start.o
 "${cc}gcc" "${flags[@]}" -c out/gm9pro-display/probe.c -o out/gm9pro-display/probe.o
 "${cc}gcc" "${flags[@]}" -static -T shim.ld -Wl,--build-id=none -Wl,--no-warn-rwx-segments -Wl,-N out/gm9pro-display/start.o out/gm9pro-display/probe.o -o out/gm9pro-display/probe.elf
 "${cc}objcopy" -O binary out/gm9pro-display/probe.elf out/gm9pro-display/Image
