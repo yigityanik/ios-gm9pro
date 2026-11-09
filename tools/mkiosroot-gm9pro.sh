@@ -101,6 +101,8 @@ printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
     > "$r/private/var/keybags/systembag.kb"
 chown 0:0 "$r/private/var/keybags/systembag.kb"
 chmod 0600 "$r/private/var/keybags/systembag.kb"
+test "$(stat -c '%a:%u:%g' "$r/private/var/keybags/systembag.kb")" = '600:0:0'
+grep -q '<key>KeyBagKeys</key>' "$r/private/var/keybags/systembag.kb"
 cmp "$work/os/root/sbin/launchd" "$r/sbin/launchd"
 cmp "$work/os/root/usr/lib/dyld" "$r/usr/lib/dyld"
 sha256sum "$r/sbin/launchd" "$r/usr/lib/dyld"
