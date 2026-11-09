@@ -17,6 +17,15 @@ edit('pexpert/pexpert/arm64/SWEET.h',
      '#define __ARM_16K_PG__            1',
      '/* Native 4 KiB: leave __ARM_16K_PG__ undefined (proc_reg.h uses ifdef). */\n#define __ARM64_PMAP_SUBPAGE_L1__ 1\n#define XNU_NATIVE_CS_HASH_CACHE 1')
 edit('makedefs/MakeInc.def', '-mcpu=cortex-a73', '-mcpu=cortex-a53')
+# The macOS build defaults to a -2 TiB link address and 16K large-memory VA
+# layout. A 4K L1 root cannot translate that address: use the existing 4K layout.
+edit('makedefs/MakeInc.def', 'LARGE_MEMORY_DEFINE=-DARM_LARGE_MEMORY=1',
+     'LARGE_MEMORY_DEFINE=-UARM_LARGE_MEMORY')
+edit('makedefs/MakeInc.def', 'ARM64_PLKSEG_ADDR  =0xfffffe0004004000',
+     'ARM64_PLKSEG_ADDR  =0xfffffff004004000')
+edit('makedefs/MakeInc.def', 'ARM64_LINK_ADDR    =0xfffffe0007004000',
+     'ARM64_LINK_ADDR    =0xfffffff007004000')
+
 
 # Match the real two-cluster MPIDRs. Keep logical CPU 0 on the boot A73.
 edit('iokit/Kernel/arm/SweetCPU.cpp',

@@ -10,6 +10,9 @@ cpus=${GM9PRO_CPUS:-1}
 if [[ "$cpus" == 8 && "${GM9PRO_KERNEL_4K:-0}" != 1 ]]; then
     echo 'Eight CPUs require the separately built native 4 KiB kernel' >&2; exit 1
 fi
+if [[ "${GM9PRO_RAM:-512m}" == 4g-device && "${GM9PRO_KERNEL_4K:-0}" != 1 ]]; then
+    echo 'The larger RAM profile requires the separately built 4 KiB kernel' >&2; exit 1
+fi
 export GM9PRO_CPUS="$cpus"
 python3 ../tools/mkadt-gm9pro.py out/gm9pro-xnu/gm9pro.adt
 init="$(dirname "$kernel")/gm9pro-init.bin"
