@@ -27,6 +27,12 @@ edit('makedefs/MakeInc.def', 'ARM64_LINK_ADDR    =0xfffffe0007004000',
      'ARM64_LINK_ADDR    =0xfffffff007004000')
 
 
+# A three-level 4K pmap uses the iOS user VA limit; the macOS 128 TiB
+# limit cannot fit its L1 geometry (and XNU checks this at compile time).
+edit('osfmk/mach/arm/vm_param.h',
+     '#if defined(XNU_PLATFORM_MacOSX) || defined(XNU_PLATFORM_DriverKit)',
+     '#if (defined(XNU_PLATFORM_MacOSX) || defined(XNU_PLATFORM_DriverKit)) && !defined(SWEET)')
+
 # Match the real two-cluster MPIDRs. Keep logical CPU 0 on the boot A73.
 edit('iokit/Kernel/arm/SweetCPU.cpp',
      'cpu->phys_id > 0x700 || (cpu->phys_id & 0xff) != 0',
