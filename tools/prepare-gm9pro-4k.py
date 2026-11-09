@@ -15,7 +15,7 @@ def edit(path, old, new):
 
 edit('pexpert/pexpert/arm64/SWEET.h',
      '#define __ARM_16K_PG__            1',
-     '/* Native 4 KiB: leave __ARM_16K_PG__ undefined (proc_reg.h uses ifdef). */\n#define __ARM64_PMAP_SUBPAGE_L1__ 1')
+     '/* Native 4 KiB: leave __ARM_16K_PG__ undefined (proc_reg.h uses ifdef). */\n#define __ARM64_PMAP_SUBPAGE_L1__ 1\n#define XNU_NATIVE_CS_HASH_CACHE 1')
 edit('makedefs/MakeInc.def', '-mcpu=cortex-a73', '-mcpu=cortex-a53')
 
 # Match the real two-cluster MPIDRs. Keep logical CPU 0 on the boot A73.
