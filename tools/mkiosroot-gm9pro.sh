@@ -69,6 +69,7 @@ if ! mountpoint -q "$work/root"; then
 fi
 root_mounted=1
 r=$work/root
+python3 "$(dirname "${BASH_SOURCE[0]}")/prepare-gm9pro-launchd.py" "$r/System/Library/xpc/launchd.plist"
 cache=private/preboot/Cryptexes/OS/System/Library/Caches/com.apple.dyld
 mkdir -p "$r/System/Library/Caches/com.apple.dyld"
 for file in "$r/$cache"/*; do
