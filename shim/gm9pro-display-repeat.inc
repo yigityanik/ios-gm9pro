@@ -54,6 +54,35 @@ static void display_probe(void)
     hex("initial DSI intr", read32(dsi + 0x110));
     hex("initial DSI FIFO", read32(dsi + 0x0c));
     hex("initial DSI clock", read32(dsi + 0x120));
+#if GM9_DISPLAY_VARIANT == 3
+    puts_uart("GM9 DISPLAY CONFIG: read-only, no framebuffer or controller writes\n");
+    hex("VIG0 source size", read32(vig));
+    hex("VIG0 image size", read32(vig + 0x04));
+    hex("VIG0 output size", read32(vig + 0x0c));
+    hex("VIG0 source address", read32(vig + 0x14));
+    hex("VIG0 stride", read32(vig + 0x24));
+    hex("VIG0 format", read32(vig + 0x30));
+    hex("CTL0 top", read32(ctl + 0x14));
+    hex("CTL0 flush", read32(ctl + 0x18));
+    hex("DSI control", read32(dsi + 0x04));
+    hex("DSI command MDP control", read32(dsi + 0x3c));
+    hex("DSI command DCS control", read32(dsi + 0x44));
+    hex("DSI stream0 control", read32(dsi + 0x60));
+    hex("DSI stream0 total", read32(dsi + 0x64));
+    hex("DSI stream1 control", read32(dsi + 0x58));
+    hex("DSI stream1 total", read32(dsi + 0x5c));
+    hex("DSI trigger control", read32(dsi + 0x84));
+    hex("DSI clock control", read32(dsi + 0x11c));
+    hex("PP0 sync config", read32(0x0c971004UL));
+    hex("PP0 sync height", read32(0x0c971008UL));
+    hex("PP0 sync threshold", read32(0x0c971018UL));
+    hex("PP0 autorefresh", read32(0x0c971030UL));
+    hex("MDP pipe clock control", read32(0x0c9012acUL));
+    puts_uart("Controller snapshot complete; reading MMCC prerequisites next\n");
+    display_smmu_snapshot();
+    puts_uart("DISPLAY CONFIG COMPLETE; reset manually\n");
+    return;
+#endif
 #if GM9_DISPLAY_VARIANT == 0
     display_smmu_snapshot();
 #endif

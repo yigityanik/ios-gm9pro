@@ -88,8 +88,8 @@ if os.environ.get('GM9PRO_DISPLAY_REPEAT') == '1':
     end = s.index('static void emmc_probe(void)', begin)
     s = s[:begin] + Path('shim/gm9pro-display-repeat.inc').read_text() + '\n' + s[end:]
     variant = int(os.environ.get('GM9PRO_DISPLAY_VARIANT', '0'))
-    if variant not in (0, 1, 2):
-        raise ValueError('Display variant must be 0, 1 or 2')
+    if variant not in (0, 1, 2, 3):
+        raise ValueError('Display variant must be 0, 1, 2 or 3')
     s = '#define GM9_DISPLAY_VARIANT %d\n' % variant + s
 Path('shim/out/gm9pro-display/probe.c').write_text(s)
 entry = Path('shim/start.S').read_text()
