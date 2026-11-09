@@ -56,6 +56,7 @@ cc=${CROSS_COMPILE:-aarch64-linux-gnu-}
 bytes=$(wc -c < out/gm9pro-xnu/payload)
 flags=(-O2 -ffreestanding -nostdlib -fno-pic -mgeneral-regs-only -mstrict-align -fno-stack-protector -Wall -Wextra -Werror -Wno-unused-function -DGM9PRO_ENTRY_TRACE -DGM9PRO_XNU_LOADER "-DPAYLOAD_BYTES=$bytes")
 if [[ "$cpus" == 8 ]]; then flags+=(-DGM9PRO_SMP_HANDOFF); fi
+if [[ "${GM9PRO_RAM:-512m}" == 4g-device ]]; then flags+=(-DGM9PRO_LARGE_RAM); fi
 objects=()
 for src in start.S gm9pro-probe.c gm9pro-console.c gm9pro-gic-prepare.c loader.c fdt.c; do
     obj="out/gm9pro-xnu/${src%.*}.o"

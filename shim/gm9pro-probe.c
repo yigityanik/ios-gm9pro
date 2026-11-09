@@ -289,6 +289,9 @@ void secondary_main(uint64_t idx)
     cpu_off();
 #endif
 }
+#ifdef GM9PRO_LARGE_RAM
+#include "gm9pro-ram-guard.inc"
+#endif
 void shim_main(uint64_t dtb)
 {
     puts_uart("\nGM9PRO SHIM PROBE 5\n");
@@ -298,6 +301,13 @@ void shim_main(uint64_t dtb)
     hex("MIDR_EL1", RSR("midr_el1"));
     hex("MPIDR_EL1", RSR("mpidr_el1"));
     hex("ID_AA64MMFR0_EL1", RSR("id_aa64mmfr0_el1"));
+#ifdef GM9PRO_LARGE_RAM
+    if (!ram_window_valid(dtb, 0xa0400000, 0x17e3c0000)) {
+        puts_uart("RAM window rejected by live ABL memory/reservation map\n");
+        for (;;) __asm__ volatile("wfe");
+    }
+    puts_uart("RAM window validated: 4 GB device, firmware reservations excluded\n");
+#endif
     uint64_t boot_aff = RSR("mpidr_el1") & 0xffffff;
     for (unsigned i = 0; i < 8; i++) {
         uint64_t aff = i < 4 ? i : 0x100 + i - 4;

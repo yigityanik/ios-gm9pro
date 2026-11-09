@@ -17,10 +17,14 @@ chosen = next(n for n in root.children if n.name == 'chosen')
 # Use only the first 512 MiB of the upper bank from the device's ABL RAM log.
 setprop(chosen, 'dram-base', struct.pack('<Q', 0x100000000))
 ram = os.environ.get('GM9PRO_RAM', '512m')
-sizes = {'512m': 0x20000000, 'upper-bank': 0x7e3c0000}
+sizes = {'512m': 0x20000000, 'upper-bank': 0x7e3c0000,
+         '4g-device': 0x17e3c0000 - 0xa0400000}
 if ram not in sizes:
-    raise SystemExit('GM9PRO_RAM must be 512m or upper-bank')
+    raise SystemExit('GM9PRO_RAM must be 512m, upper-bank or 4g-device')
 setprop(chosen, 'dram-size', struct.pack('<Q', sizes[ram]))
+if ram == '4g-device':
+    # Leave modem, TrustZone, splash and ramoops below this window.
+    setprop(chosen, 'dram-base', struct.pack('<Q', 0xa0400000))
 cpus = next(n for n in root.children if n.name == 'cpus')
 cpu = cpus.children[0]
 setprop(cpu, 'reg', struct.pack('<I', 0x100))

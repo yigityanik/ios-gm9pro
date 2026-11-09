@@ -25,5 +25,5 @@ s = s[:begin] + '''\t/* Bound UART traffic even when userspace repeatedly polls 
 \t\t    arg0, in_scalars, in_struct, out_scalars, out_struct, ret);
 \t}
 ''' + s[end:]
-p.write_text(s, newline='\n')
+p.write_bytes(s.encode())
 print('GM9 KeyStore: consistent no-passcode state and bounded SMP-safe logging')

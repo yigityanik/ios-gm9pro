@@ -11,7 +11,7 @@ def edit(path, old, new):
     text = p.read_text()
     if text.count(old) != 1:
         raise RuntimeError(f'{path}: expected one occurrence of {old!r}')
-    p.write_text(text.replace(old, new), newline='\n')
+    p.write_bytes(text.replace(old, new).encode())
 
 edit('pexpert/pexpert/arm64/SWEET.h',
      '#define __ARM_16K_PG__            1',
@@ -49,7 +49,7 @@ for name in ('64_LEGACY', '64'):
     s, count = re.subn(pattern, r'\g<1>FOURK_PAGE_SHIFT;', s)
     if count != 1:
         raise RuntimeError(f'commpage {name}: unexpected source')
-p.write_text(s, newline='\n')
+p.write_bytes(s.encode())
 edit('osfmk/vm/vm_shared_region.c',
      'vm_map_set_page_shift(sub_map, SIXTEENK_PAGE_SHIFT);',
      'vm_map_set_page_shift(sub_map, FOURK_PAGE_SHIFT);')
@@ -90,5 +90,5 @@ old = '3:\tadd\t$4, $4, PGBYTES'
 if s.count(old) != 1:
     raise RuntimeError('bootstrap allocator changed')
 s = s.replace(old, old + '\n\tadd $6, x25, #(BOOTSTRAP_TABLE_BYTES >> 12), lsl #12\n\tcmp $4, $6\n\tb.hs Lgm9_tables_exhausted')
-p.write_text(s, newline='\n')
+p.write_bytes(s.encode())
 print('GM9 Pro native 4 KiB, common A53/A73 ISA and eight-CPU topology staged')
