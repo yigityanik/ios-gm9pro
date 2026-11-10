@@ -141,7 +141,14 @@ jobs:
         run: |
           mkdir -p out
           find dxb/fakeroot/System/Library/Kernels -type f -name '*sweet*' -exec cp {} out/ \;
-          test -n "$(find out -type f -name '*sweet*' -print -quit)"
+          kernel=$(find out -type f -name '*sweet*' -print -quit)
+          test -n "$kernel"
+          xcrun llvm-objdump --macho --disassemble --arch=arm64 "$kernel" > /tmp/gm9pro-kernel.dis
+          if grep -Eiq '(^|[[:space:]])(cas|casp|ldadd|ldclr|ldeor|ldset|ldsmax|ldsmin|ldumax|ldumin|swp)(b|h)?(a|l|al)?([[:space:]]|$)' /tmp/gm9pro-kernel.dis; then
+            echo 'Kernel contains ARMv8.1 LSE atomics unsupported by the GM9 Pro Kryo 260 baseline.' >&2
+            grep -Ei '(^|[[:space:]])(cas|casp|ldadd|ldclr|ldeor|ldset|ldsmax|ldsmin|ldumax|ldumin|swp)(b|h)?(a|l|al)?([[:space:]]|$)' /tmp/gm9pro-kernel.dis | head -20 >&2
+            exit 1
+          fi
           shasum -a 256 out/* > out/SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:

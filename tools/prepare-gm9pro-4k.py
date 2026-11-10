@@ -24,8 +24,9 @@ if hybrid_pages:
          '#define __ARM_16K_PG__            1',
          '/* Common ARMv8-A A53/A73 baseline: no crypto, PAN or hardware 16 KiB granule. */\n'
          '#define __ARM64_PMAP_SUBPAGE_L1__ 1')
-    edit('makedefs/MakeInc.def', '-mcpu=cortex-a73',
-         '-march=armv8-a -mtune=cortex-a53')
+    # Keep the SDM660 Kryo 260 on the ARMv8.0 ISA baseline; -march alone
+    # can leave Apple's arm64 target features enabled, including LSE atomics.
+    edit('makedefs/MakeInc.def', '-mcpu=cortex-a73', '-mcpu=cortex-a53')
     p = source / 'osfmk/arm64/corecrypto/sha256_compress_arm64.s'
     s = p.read_text(encoding='utf-8')
     if not s.startswith('\t.arch_extension sha2\n'):
