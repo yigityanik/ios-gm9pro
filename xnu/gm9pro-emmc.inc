@@ -13,6 +13,7 @@
 #include <sys/vnode.h>
 #include <miscfs/devfs/devfs.h>
 #include <kern/locks.h>
+#include <kern/kalloc.h>
 
 #define GM9_MAX_PARTITIONS 256
 static struct gm9_partition {
@@ -23,6 +24,7 @@ static unsigned gm9_part_count;
 static int gm9_bmajor = -1, gm9_cmajor = -1;
 static bool gm9_ready, gm9_failed;
 static bool gm9_write_enabled, gm9_write_failed, gm9_write_safe;
+static bool gm9_multi_enabled, gm9_transport_failed;
 /* A bounded sector overlay for diagnostics; never writes the physical card. */
 #define GM9_COW_SLOTS 65536U
 static bool gm9_cow_enabled;
@@ -171,7 +173,7 @@ gm9_read_gpt(void)
 static int
 gm9_open(dev_t dev, int flags, __unused int type, __unused struct proc *p)
 {
-    if (!gm9_partition(dev)) return ENXIO;
+    if (!gm9_partition(dev) || gm9_transport_failed) return ENXIO;
     return (flags & FWRITE) && ((!gm9_write_enabled && !gm9_cow_enabled) || gm9_write_failed ||
         minor(dev) != gm9_userdata) ? EROFS : 0;
 }
@@ -203,7 +205,8 @@ gm9_strategy(buf_t bp)
     if (!count) goto done;
     if (buf_map(bp, &address)) { error = EIO; goto done; }
     lck_mtx_lock(&gm9_emmc_lock);
-    while (completed < count) {
+    if (gm9_transport_failed) error = EIO;
+    while (!error && completed < count) {
         uint64_t lba = part->first + (uint64_t)block + completed / 512;
         if (gm9_cow_enabled && minor(buf_device(bp)) == gm9_userdata) {
             uint64_t rel = (uint64_t)block + completed / 512;
@@ -224,6 +227,24 @@ gm9_strategy(buf_t bp)
                 break;
             }
             completed += 512;
+            buf_setresid(bp, count - completed);
+            continue;
+        }
+        /* Preserve sector-level overlay semantics and the single-sector write
+         * path. Only physical reads share a bounded CMD23/CMD18 transaction.
+         */
+        unsigned blocks = MIN((count - completed) / 512, GM9_READ_MAX_BLOCKS);
+        if (!writing && gm9_multi_enabled && blocks > 1) {
+            if (gm9_read_blocks((uint32_t)lba, blocks, (uint8_t *)address + completed)) {
+                /* A failed data transaction may still own the card. Do not
+                 * retry on CMD17 or allow later filesystem writes after it.
+                 */
+                gm9_transport_failed = gm9_write_failed = true;
+                error = EIO;
+                printf("GM9 eMMC: multiblock read failed at LBA %llu; transport stopped\n", lba);
+                break;
+            }
+            completed += blocks * 512;
             buf_setresid(bp, count - completed);
             continue;
         }
@@ -299,6 +320,41 @@ static const struct cdevsw gm9_cdevsw = {
 };
 
 static int
+gm9_multi_init(void)
+{
+    unsigned int requested = 1;
+    (void)PE_parse_boot_argn("gm9multi", &requested, sizeof(requested));
+    if (requested != 1) {
+        printf("GM9 eMMC: CMD17 compatibility mode\n");
+        return 0;
+    }
+    /* Verify the mapped MMIO path before exposing a writable root device.
+     * The standalone hardware probe also compares 2/8/128-sector reads at
+     * three card locations. This check covers the GPT under XNU's MMU.
+     */
+    const unsigned bytes = GM9_READ_MAX_BLOCKS * 512;
+    uint8_t *data = kalloc_data(bytes, Z_WAITOK);
+    if (!data) return ENOMEM;
+    int error = 0;
+    uint8_t single[512];
+    if (gm9_read_blocks(0, GM9_READ_MAX_BLOCKS, data)) error = EIO;
+    for (unsigned i = 0; !error && i < GM9_READ_MAX_BLOCKS; i++) {
+        if (read_block(17, i, single) || memcmp(data + i * 512, single, 512))
+            error = EIO;
+    }
+    kfree_data(data, bytes);
+    if (error) {
+        gm9_transport_failed = gm9_write_failed = true;
+        printf("GM9 eMMC: mapped multiblock verification failed; root not published\n");
+        return error;
+    }
+    gm9_multi_enabled = true;
+    printf("GM9 eMMC: CMD18 enabled, max %u sectors; mapped read comparison PASS\n",
+        GM9_READ_MAX_BLOCKS);
+    return 0;
+}
+
+static int
 gm9_disk_init(void)
 {
     if (gm9_ready) return 0;
@@ -308,6 +364,8 @@ gm9_disk_init(void)
     if (!regs) return ENOMEM;
     gm9_quiet = true;
     int error = gm9_read_gpt();
+    if (error) return error;
+    error = gm9_multi_init();
     if (error) return error;
     unsigned int requested = 0;
     gm9_cow_enabled = PE_parse_boot_argn("gm9cow", &requested, sizeof(requested)) &&

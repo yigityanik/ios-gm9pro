@@ -13,6 +13,7 @@ on:
       - tools/mkinit.py
       - shim/loader.c
       - shim/gm9pro-probe.c
+      - shim/gm9pro-emmc-multi.inc
       - tools/prepare-gm9pro-4k.py
       - .github/workflows/gm9pro-xnu-4k.yml
   workflow_dispatch:

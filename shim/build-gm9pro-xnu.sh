@@ -31,6 +31,9 @@ case "${GM9PRO_BOOT_MODE:-ram}" in
         [[ "$part" =~ ^[A-Za-z0-9_]+$ ]] || { echo 'Invalid root partition name' >&2; exit 1; }
         args=()
         cmdline="debug=0x14e serial=3 cpus=1 keepsyms=1 -noprogress rd=emmcroot0 emmcroot=$part unentitled_ios_sim_launch=1 ignition_level=1"
+        multi=${GM9PRO_MULTI_READS:-1}
+        [[ "$multi" == 0 || "$multi" == 1 ]] || { echo 'GM9PRO_MULTI_READS must be 0 or 1' >&2; exit 1; }
+        cmdline+=" gm9multi=$multi"
         if [[ "${GM9PRO_ENABLE_WRITES:-0}" == 1 ]]; then
             [[ "$part" == userdata ]] || { echo 'Writes are limited to userdata' >&2; exit 1; }
             [[ "${GM9PRO_COW:-0}" != 1 ]] || { echo 'COW and physical writes cannot both be requested' >&2; exit 1; }
