@@ -22,6 +22,14 @@ on:
       - tools/prepare-gm9pro-4k.py
       - .github/workflows/gm9pro-xnu-4k.yml
   workflow_dispatch:
+    inputs:
+      page_model:
+        description: XNU page model for the A53/A73 mix
+        type: choice
+        options:
+          - 4k-hw-16k-sw
+          - native-4k
+        default: 4k-hw-16k-sw
 permissions:
   contents: read
 concurrency:
@@ -35,6 +43,7 @@ jobs:
       MACOS_VERSION: '13.5'
       KERNEL_CONFIG: DEVELOPMENT
       MACHINE_CONFIG: SWEET
+      GM9_PAGE_MODEL: ${{ github.event.inputs.page_model || '4k-hw-16k-sw' }}
     steps:
       - uses: actions/checkout@v4
       - name: Prepare build tools
@@ -54,12 +63,16 @@ jobs:
           git -C dxb checkout -q FETCH_HEAD
           python3 - <<'PY'
           from pathlib import Path
+          import os
           import shutil
+          page_model = os.environ.get('GM9_PAGE_MODEL', 'native-4k')
+          if page_model not in ('native-4k', '4k-hw-16k-sw'):
+              raise SystemExit(f'unsupported GM9_PAGE_MODEL: {page_model}')
           # Bring up the measured GM9 framebuffer and MobileFramebuffer path;
           # Keep Pixel hardware drivers disabled; add the qualified GM9 sec_ts path.
           for p in Path('xnu/patches').iterdir():
               selected = {20, 21, 22, 23, 24, 25, 26, 27, 29, 32, 33, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 48, 49, 50, 51, 52, 53, 55, 57, 58, 65, 78}
-              if p.suffix in ('.patch', '.sh') and (int(p.name[:4]) <= 19 or int(p.name[:4]) in selected or p.name in ('0080-sweet-armv8.0-baseline.patch', '0089-gm9pro-native-4k-signatures.patch')):
+              if p.suffix in ('.patch', '.sh') and (int(p.name[:4]) <= 19 or int(p.name[:4]) in selected or p.name == '0080-sweet-armv8.0-baseline.patch' or (p.name == '0089-gm9pro-native-4k-signatures.patch' and page_model == 'native-4k')):
                   shutil.copyfile(p, Path('dxb/patches') / p.name)
                   if p.name == '0055-sweet-aks-ext-state-sampler-depth.patch':
                       target = Path('dxb/patches') / p.name
@@ -78,9 +91,9 @@ jobs:
           assert s.count('    patches\n') == 1
           s = s.replace('    patches\n', '    patches\n    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro.py" "$WORK_DIR/xnu"\n')
           s = s.replace('    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro.py" "$WORK_DIR/xnu"\n',
-                        '    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro.py" "$WORK_DIR/xnu"\n    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro-display.py" "$WORK_DIR/xnu"\n    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro-aks.py" "$WORK_DIR/xnu"\n    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro-4k.py" "$WORK_DIR/xnu"\n')
+                        '    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro.py" "$WORK_DIR/xnu"\n    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro-display.py" "$WORK_DIR/xnu"\n    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro-aks.py" "$WORK_DIR/xnu"\n    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro-4k.py" "$WORK_DIR/xnu" "$GM9_PAGE_MODEL"\n')
           # Do not package a kernel after an unapplied device patch.
-          anchor = '    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro-4k.py" "$WORK_DIR/xnu"\n'
+          anchor = '    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro-4k.py" "$WORK_DIR/xnu" "$GM9_PAGE_MODEL"\n'
           assert s.count(anchor) == 1
           s = s.replace(anchor, anchor + '    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro-debug.py" "$WORK_DIR/xnu"\n')
           anchor = '    python3 "$GITHUB_WORKSPACE/tools/prepare-gm9pro-debug.py" "$WORK_DIR/xnu"\n'
@@ -110,10 +123,10 @@ jobs:
           shasum -a 256 out/* > out/SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
-          name: gm9pro-xnu-4k-kernel
+          name: gm9pro-xnu-${{ github.event.inputs.page_model || '4k-hw-16k-sw' }}-kernel
           path: out/
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: gm9pro-xnu-4k-build-log
+          name: gm9pro-xnu-${{ github.event.inputs.page_model || '4k-hw-16k-sw' }}-build-log
           path: gm9pro-build.log

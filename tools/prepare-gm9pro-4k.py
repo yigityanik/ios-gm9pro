@@ -5,6 +5,10 @@ import re
 import sys
 
 source = Path(sys.argv[1])
+mode = sys.argv[2] if len(sys.argv) > 2 else 'native-4k'
+if mode not in ('native-4k', '4k-hw-16k-sw'):
+    raise SystemExit(f'unknown GM9 page model: {mode}')
+hybrid_pages = mode == '4k-hw-16k-sw'
 
 def edit(path, old, new):
     p = source / path
@@ -13,10 +17,24 @@ def edit(path, old, new):
         raise RuntimeError(f'{path}: expected one occurrence of {old!r}')
     p.write_bytes(text.replace(old, new).encode())
 
-edit('pexpert/pexpert/arm64/SWEET.h',
-     '#define __ARM_16K_PG__            1',
-     '/* Native 4 KiB: leave __ARM_16K_PG__ undefined (proc_reg.h uses ifdef). */\n#define __ARM64_PMAP_SUBPAGE_L1__ 1\n#define XNU_NATIVE_CS_HASH_CACHE 1')
-edit('makedefs/MakeInc.def', '-mcpu=cortex-a73', '-mcpu=cortex-a53')
+if hybrid_pages:
+    edit('pexpert/pexpert/arm64/SWEET.h',
+         '#define __ARM_V8_CRYPTO_EXTENSIONS__ 1\n'
+         '/* no __ARM_PAN_AVAILABLE__: PAN is ARMv8.1, the Pixel 1 Kryo is v8.0 */\n'
+         '#define __ARM_16K_PG__            1',
+         '/* Common ARMv8-A A53/A73 baseline: no crypto, PAN or hardware 16 KiB granule. */\n'
+         '#define __ARM64_PMAP_SUBPAGE_L1__ 1')
+    edit('makedefs/MakeInc.def', '-mcpu=cortex-a73',
+         '-march=armv8-a -mtune=cortex-a53')
+    p = source / 'osfmk/arm64/corecrypto/sha256_compress_arm64.s'
+    s = p.read_text(encoding='utf-8')
+    if not s.startswith('\t.arch_extension sha2\n'):
+        p.write_text('\t.arch_extension sha2\n' + s, encoding='utf-8')
+else:
+    edit('pexpert/pexpert/arm64/SWEET.h',
+         '#define __ARM_16K_PG__            1',
+         '/* Native 4 KiB: leave __ARM_16K_PG__ undefined (proc_reg.h uses ifdef). */\n#define __ARM64_PMAP_SUBPAGE_L1__ 1\n#define XNU_NATIVE_CS_HASH_CACHE 1')
+    edit('makedefs/MakeInc.def', '-mcpu=cortex-a73', '-mcpu=cortex-a53')
 # The macOS build defaults to a -2 TiB link address and 16K large-memory VA
 # layout. A 4K L1 root cannot translate that address: use the existing 4K layout.
 edit('makedefs/MakeInc.def', 'LARGE_MEMORY_DEFINE=-DARM_LARGE_MEMORY=1',
@@ -76,25 +94,33 @@ edit('iokit/Kernel/arm/SweetCPU.cpp', 'cpu->phys_id == 0 ||',
 edit('osfmk/arm/pmap/pmap.c', '(vm_offset_t) (pp << PAGE_SHIFT)',
      '((vm_offset_t)pp << PAGE_SHIFT)')
 
-# Native 4K page policy adapted from UniXNU's native-4k-user-abi patch.
+# 4 KiB hardware tables are required by the A53 cluster. Keep XNU's 16 KiB
+# software page ABI in hybrid mode so signed iPhone binaries remain native.
 edit('osfmk/arm/arm_init.c',
-     'if (args->memSize > 1ULL * 1024 * 1024 * 1024)', 'if (0 /* GM9: retain native 4 KiB at every RAM size */)')
-edit('osfmk/arm/arm_init.c', 'page_shift_user32 = PAGE_MAX_SHIFT;',
-     'page_shift_user32 = ARM_PGSHIFT;')
-edit('bsd/kern/mach_loader.c', 'vm_map_set_page_shift(map, SIXTEENK_PAGE_SHIFT);',
-     'vm_map_set_page_shift(map, FOURK_PAGE_SHIFT);')
-p = source / 'osfmk/arm/commpage/commpage.c'
-s = p.read_text(encoding='utf-8')
-for name in ('64_LEGACY', '64'):
-    old = f'(_COMM_PAGE_USER_PAGE_SHIFT_{name} + '
-    pattern = r'(' + re.escape(old) + r'[^\n]+?\(uint8_t\) )SIXTEENK_PAGE_SHIFT;'
-    s, count = re.subn(pattern, r'\g<1>FOURK_PAGE_SHIFT;', s)
-    if count != 1:
-        raise RuntimeError(f'commpage {name}: unexpected source')
-p.write_bytes(s.encode())
-edit('osfmk/vm/vm_shared_region.c',
-     'vm_map_set_page_shift(sub_map, SIXTEENK_PAGE_SHIFT);',
-     'vm_map_set_page_shift(sub_map, FOURK_PAGE_SHIFT);')
+     'if (args->memSize > 1ULL * 1024 * 1024 * 1024)',
+     'if (1 /* GM9: keep the 16 KiB software page ABI on 4 KiB hardware */)' if hybrid_pages
+     else 'if (0 /* GM9: retain native 4 KiB software pages at every RAM size */)')
+if not hybrid_pages:
+    edit('osfmk/arm/arm_init.c', 'page_shift_user32 = PAGE_MAX_SHIFT;',
+         'page_shift_user32 = ARM_PGSHIFT;')
+    edit('bsd/kern/mach_loader.c', 'vm_map_set_page_shift(map, SIXTEENK_PAGE_SHIFT);',
+         'vm_map_set_page_shift(map, FOURK_PAGE_SHIFT);')
+    p = source / 'osfmk/arm/commpage/commpage.c'
+    s = p.read_text(encoding='utf-8')
+    for name in ('64_LEGACY', '64'):
+        old = f'(_COMM_PAGE_USER_PAGE_SHIFT_{name} + '
+        pattern = r'(' + re.escape(old) + r'[^\n]+?\(uint8_t\) )SIXTEENK_PAGE_SHIFT;'
+        s, count = re.subn(pattern, r'\g<1>FOURK_PAGE_SHIFT;', s)
+        if count != 1:
+            raise RuntimeError(f'commpage {name}: unexpected source')
+    p.write_bytes(s.encode())
+    edit('osfmk/vm/vm_shared_region.c',
+         'vm_map_set_page_shift(sub_map, SIXTEENK_PAGE_SHIFT);',
+         'vm_map_set_page_shift(sub_map, FOURK_PAGE_SHIFT);')
+else:
+    edit('osfmk/arm/pmap/pmap.c',
+         '\t\tint text_leaf_index = random() % num_ptes;',
+         '\t\tint text_leaf_index = (int)(random() % (num_ptes / PAGE_RATIO)) * PAGE_RATIO;')
 
 # The 4K low-globals region starts at -64 GiB, not VM_MIN_KERNEL_ADDRESS
 # (-128 GiB). Its L2 table already exists when the UART alias is installed.
@@ -175,4 +201,4 @@ edit('bsd/kern/ubc_subr.c',
 \t\t    proc_selfpid(), limit, read_ns / 1000000ULL, hash_ns / 1000000ULL);
 \t}
 \terror = 0;''')
-print('GM9 Pro native 4 KiB, common A53/A73 ISA and eight-CPU topology staged')
+print(f'GM9 Pro {mode}: 4 KiB hardware granule, common A53/A73 ISA and eight-CPU topology staged')
