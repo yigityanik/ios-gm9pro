@@ -15,6 +15,8 @@ HEADER = re.compile(r'GM9 WAIT (\S+)\[(\d+)\] threads=(\d+) blocked_shown=(\d+) 
 THREAD = re.compile(r'GM9 WAIT (\S+)\[(\d+)\] t(\d+) state=([0-9a-f]+) '
                     r'event=([0-9a-f]+) pc=([0-9a-f]+) lr=([0-9a-f]+) '
                     r'sp=([0-9a-f]+) bt((?: [0-9a-f]+)*)')
+FRAME = re.compile(r'GM9 FRAME ticks=(\d+) swaps=(\d+) copies=(\d+) notify=(\d+) '
+                   r'delivered=(\d+) errors=(\d+) last=(0x[0-9a-f]+)')
 
 
 def samples(text):
@@ -22,6 +24,13 @@ def samples(text):
     for line in text.splitlines():
         if 'GM9 WAIT snapshot=' in line:
             current = line[line.index('GM9 WAIT snapshot='):]
+        frame = FRAME.search(line)
+        if frame:
+            keys = ('ticks', 'swaps', 'copies', 'notify', 'delivered', 'errors', 'last')
+            values = frame.groups()
+            row = dict(zip(keys, [int(v) for v in values[:-1]] + [int(values[-1], 16)]))
+            yield current, None, None, None, None, None, None, row
+            continue
         header = HEADER.search(line)
         if header:
             name, pid, total, shown, slide, mh = header.groups()
@@ -62,8 +71,16 @@ def main():
         return resolved[unslid]
 
     headers = 0
+    previous_frame = None
     for snapshot, name, pid, total, shown, slide, mh, row in samples(
             args.log.read_text(encoding='utf-8', errors='replace')):
+        if name is None:
+            print(f'\n{snapshot}: display counters {row}')
+            if previous_frame is not None and row['ticks'] >= previous_frame['ticks']:
+                print('  delta ' + ', '.join(f'{key}=+{row[key] - previous_frame[key]}'
+                      for key in ('ticks', 'swaps', 'copies', 'notify', 'delivered', 'errors')))
+            previous_frame = row
+            continue
         if row is None:
             headers += 1
             contexts[pid] = slide, mh
