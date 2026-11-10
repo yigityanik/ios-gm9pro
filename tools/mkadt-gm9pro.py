@@ -31,11 +31,14 @@ setprop(cpu, 'reg', struct.pack('<I', 0x100))
 for key in ('timebase-frequency', 'peripheral-frequency', 'fixed-frequency'):
     setprop(cpu, key, struct.pack('<I', 19200000))
 count = int(os.environ.get('GM9PRO_CPUS', '1'))
-if count not in (1, 8):
-    raise SystemExit('GM9PRO_CPUS must be 1 or 8')
-if count == 8:
+if count not in (1, 4, 8):
+    raise SystemExit('GM9PRO_CPUS must be 1, 4 or 8')
+if count in (4, 8):
     cpus.children = []
-    for logical, mpidr in enumerate((0x100, 0x101, 0x102, 0x103, 0, 1, 2, 3)):
+    mpidrs = (0x100, 0x101, 0x102, 0x103)
+    if count == 8:
+        mpidrs += (0, 1, 2, 3)
+    for logical, mpidr in enumerate(mpidrs):
         n = copy.deepcopy(cpu)
         setprop(n, 'name', ('cpu%d' % logical).encode() + b'\0')
         setprop(n, 'reg', struct.pack('<I', mpidr))
