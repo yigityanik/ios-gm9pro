@@ -14,6 +14,7 @@ extern int hz;
 /* This declaration is hidden from the BSD layer by MACH_KERNEL_PRIVATE. */
 extern void thread_terminate_self(void);
 extern void gm9_sample_task(const char *, int, task_t);
+extern void gm9_framebuffer_sample(void);
 void gm9_sample_start(void);
 
 static int
@@ -46,6 +47,7 @@ gm9_sample_thread(__unused void *arg, __unused wait_result_t result)
         (void)tsleep(&channel, PZERO, "gm9wait", 15 * hz);
         bool found = false;
         printf("GM9 WAIT snapshot=%u poll=%u\n", samples + 1, poll);
+        gm9_framebuffer_sample();
         proc_iterate(PROC_ALLPROCLIST, gm9_sample_proc, &found, NULL, NULL);
         if (found) {
             samples++;
