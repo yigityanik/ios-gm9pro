@@ -11,6 +11,8 @@
 
 extern task_t proc_task(proc_t);
 extern int hz;
+/* This declaration is hidden from the BSD layer by MACH_KERNEL_PRIVATE. */
+extern void thread_terminate_self(void);
 extern void gm9_sample_task(const char *, int, task_t);
 void gm9_sample_start(void);
 
