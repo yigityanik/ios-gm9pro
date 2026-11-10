@@ -139,4 +139,40 @@ if s.count(old) != 1:
     raise RuntimeError('bootstrap allocator changed')
 s = s.replace(old, old + '\n\tadd $6, x25, #(BOOTSTRAP_TABLE_BYTES >> 12), lsl #12\n\tcmp $4, $6\n\tb.hs Lgm9_tables_exhausted')
 p.write_bytes(s.encode())
+# Per-object timing avoids attributing other CPUs' I/O to this signature.
+edit('bsd/kern/ubc_subr.c', '#include <kern/thread.h>',
+     '#include <kern/thread.h>\n#include <kern/clock.h>')
+edit('bsd/kern/ubc_subr.c', '\tuint64_t limit, offset, chunk;',
+     '\tuint64_t limit, offset, chunk;\n\tuint64_t read_ticks = 0, hash_ticks = 0;')
+edit('bsd/kern/ubc_subr.c',
+     '\tioflags = limit > CS_NATIVE4K_UNCACHED ? IO_NOCACHE : 0;',
+     '''\tioflags = limit > CS_NATIVE4K_UNCACHED ? IO_NOCACHE : 0;
+\tif (limit > CS_NATIVE4K_UNCACHED) {
+\t\tprintf("GM9 CS4K begin: pid=%d bytes=%llu base=%lld\\n",
+\t\t    proc_selfpid(), limit, (long long)blob->csb_base_offset);
+\t}''')
+edit('bsd/kern/ubc_subr.c',
+     '\t\tos_atomic_add(&cs_native4k_read_ticks, hash_start - read_start, relaxed);',
+     '\t\tread_ticks += hash_start - read_start;\n\t\tos_atomic_add(&cs_native4k_read_ticks, hash_start - read_start, relaxed);')
+edit('bsd/kern/ubc_subr.c',
+     '\t\tos_atomic_add(&cs_native4k_hash_ticks, mach_absolute_time() - hash_start, relaxed);',
+     '''\t\tconst uint64_t hash_elapsed = mach_absolute_time() - hash_start;
+\t\thash_ticks += hash_elapsed;
+\t\tos_atomic_add(&cs_native4k_hash_ticks, hash_elapsed, relaxed);
+\t\tif (limit > CS_NATIVE4K_UNCACHED &&
+\t\t    ((chunk + chunk_length) % (256ULL * 1024 * 1024) == 0)) {
+\t\t\tprintf("GM9 CS4K progress: pid=%d bytes=%llu/%llu\\n",
+\t\t\t    proc_selfpid(), chunk + chunk_length, limit);
+\t\t}''')
+edit('bsd/kern/ubc_subr.c',
+     '\tos_atomic_inc(&cs_native4k_ready_blobs, relaxed);\n\terror = 0;',
+     '''\tos_atomic_inc(&cs_native4k_ready_blobs, relaxed);
+\tif (limit > CS_NATIVE4K_UNCACHED) {
+\t\tuint64_t read_ns, hash_ns;
+\t\tabsolutetime_to_nanoseconds(read_ticks, &read_ns);
+\t\tabsolutetime_to_nanoseconds(hash_ticks, &hash_ns);
+\t\tprintf("GM9 CS4K done: pid=%d bytes=%llu read_ms=%llu hash_ms=%llu\\n",
+\t\t    proc_selfpid(), limit, read_ns / 1000000ULL, hash_ns / 1000000ULL);
+\t}
+\terror = 0;''')
 print('GM9 Pro native 4 KiB, common A53/A73 ISA and eight-CPU topology staged')
