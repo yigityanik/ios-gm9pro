@@ -34,6 +34,33 @@ edit('osfmk/mach/arm/vm_param.h',
      '#if (defined(XNU_PLATFORM_MacOSX) || defined(XNU_PLATFORM_DriverKit)) && !defined(SWEET)')
 
 # Match the real two-cluster MPIDRs. Keep logical CPU 0 on the boot A73.
+# The macOS 128 GiB zone reservation cannot fit the 4K non-large VA map.
+# Select the existing mobile policy, including its metadata sizing. zsize
+# controls the physical limit only and cannot repair this VA reservation.
+edit('osfmk/kern/zalloc.c',
+     '#if XNU_PLATFORM_MacOSX\n#define ZONE_MAP_MAX',
+     '#if XNU_PLATFORM_MacOSX && !defined(SWEET)\n#define ZONE_MAP_MAX')
+edit('osfmk/vm/vm_compressor.c',
+     '#if XNU_TARGET_OS_OSX\n\n\tif (vm_compression_limit == 0)',
+     '#if XNU_TARGET_OS_OSX && !defined(SWEET)\n\n\tif (vm_compression_limit == 0)')
+
+# Report the complete fixed-claim budget before deriving pointer/data ranges.
+# Keep the allocator's placement checks and randomization intact.
+edit('osfmk/vm/vm_kern.c',
+     '\tassert((total_claims & PAGE_MASK) == 0);\n\tlargest_free_size -= total_claims;',
+     '''\tassert((total_claims & PAGE_MASK) == 0);
+\tprintf("GM9 VM: largest free=%llu MiB fixed claims=%llu MiB\\n",
+\t    (unsigned long long)(largest_free_size >> 20),
+\t    (unsigned long long)(total_claims >> 20));
+\tfor (uint32_t i = 0; i < kmem_claim_count; i++) {
+\t\tprintf("GM9 VM claim %s: %llu MiB\\n", kmem_claims[i].kc_name,
+\t\t    (unsigned long long)(kmem_claims[i].kc_size >> 20));
+\t}
+\tif (total_claims >= largest_free_size) {
+\t\tpanic("GM9 VM: fixed claims exceed available kernel VA");
+\t}
+\tlargest_free_size -= total_claims;''')
+
 edit('iokit/Kernel/arm/SweetCPU.cpp',
      'cpu->phys_id > 0x700 || (cpu->phys_id & 0xff) != 0',
      'cpu->phys_id > 0x103 || (cpu->phys_id & 0xff) > 3')
