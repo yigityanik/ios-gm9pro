@@ -115,6 +115,22 @@ jobs:
         run: |
           set -o pipefail
           bash build.sh 2>&1 | tee "$GITHUB_WORKSPACE/gm9pro-build.log"
+      - name: Report build diagnostics
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          log = Path('gm9pro-build.log')
+          lines = log.read_text(errors='replace').splitlines() if log.exists() else []
+          errors = [line.strip() for line in lines
+                    if re.search(r'(^|\s)(fatal error:|error:|undefined reference|Error [0-9]+:)', line)]
+          if not errors:
+              errors = lines[-30:]
+          for line in errors[:20]:
+              line = line.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              print(f'::error title=Build diagnostic::{line}')
+          PY
       - name: Collect kernel
         run: |
           mkdir -p out
