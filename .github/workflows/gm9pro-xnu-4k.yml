@@ -123,11 +123,16 @@ jobs:
           import re
           log = Path('gm9pro-build.log')
           lines = log.read_text(errors='replace').splitlines() if log.exists() else []
-          errors = [line for line in lines if re.search(
-              r'(^|\b)(error:|fatal error:|undefined symbol|undefined reference|'
-              r'no such file|not found|traceback|failed|failure|panic:|make\[|ld:)',
-              line, re.IGNORECASE)]
-          tail = '\n'.join(errors[-20:] if errors else lines[-12:])
+          tracebacks = [i for i, line in enumerate(lines) if 'Traceback (most recent call last)' in line]
+          if tracebacks:
+              tail_lines = lines[max(0, tracebacks[-1] - 2):]
+          else:
+              failures = [i for i, line in enumerate(lines) if re.search(
+                  r'(fatal error:|undefined symbol|undefined reference|no such file|'
+                  r'not found|exception:|panic:|make\[[0-9]+\]: \*\*\*|clang: error:|ld: error:)',
+                  line, re.IGNORECASE) and '[warning] Skipping patch' not in line]
+              tail_lines = lines[max(0, failures[-1] - 12):] if failures else lines[-20:]
+          tail = '\n'.join(tail_lines)
           tail = tail[-3000:] or 'gm9pro-build.log was not created or is empty'
           tail = tail.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
           print(f'::error title=Build failure details::{tail}')
