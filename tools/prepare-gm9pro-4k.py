@@ -8,7 +8,7 @@ source = Path(sys.argv[1])
 
 def edit(path, old, new):
     p = source / path
-    text = p.read_text()
+    text = p.read_text(encoding='utf-8')
     if text.count(old) != 1:
         raise RuntimeError(f'{path}: expected one occurrence of {old!r}')
     p.write_bytes(text.replace(old, new).encode())
@@ -33,7 +33,6 @@ edit('osfmk/mach/arm/vm_param.h',
      '#if defined(XNU_PLATFORM_MacOSX) || defined(XNU_PLATFORM_DriverKit)',
      '#if (defined(XNU_PLATFORM_MacOSX) || defined(XNU_PLATFORM_DriverKit)) && !defined(SWEET)')
 
-# Match the real two-cluster MPIDRs. Keep logical CPU 0 on the boot A73.
 # The macOS 128 GiB zone reservation cannot fit the 4K non-large VA map.
 # Select the existing mobile policy, including its metadata sizing. zsize
 # controls the physical limit only and cannot repair this VA reservation.
@@ -61,6 +60,7 @@ edit('osfmk/vm/vm_kern.c',
 \t}
 \tlargest_free_size -= total_claims;''')
 
+# Match the real two-cluster MPIDRs. Keep logical CPU 0 on the boot A73.
 edit('iokit/Kernel/arm/SweetCPU.cpp',
      'cpu->phys_id > 0x700 || (cpu->phys_id & 0xff) != 0',
      'cpu->phys_id > 0x103 || (cpu->phys_id & 0xff) > 3')
@@ -84,7 +84,7 @@ edit('osfmk/arm/arm_init.c', 'page_shift_user32 = PAGE_MAX_SHIFT;',
 edit('bsd/kern/mach_loader.c', 'vm_map_set_page_shift(map, SIXTEENK_PAGE_SHIFT);',
      'vm_map_set_page_shift(map, FOURK_PAGE_SHIFT);')
 p = source / 'osfmk/arm/commpage/commpage.c'
-s = p.read_text()
+s = p.read_text(encoding='utf-8')
 for name in ('64_LEGACY', '64'):
     old = f'(_COMM_PAGE_USER_PAGE_SHIFT_{name} + '
     pattern = r'(' + re.escape(old) + r'[^\n]+?\(uint8_t\) )SIXTEENK_PAGE_SHIFT;'
@@ -109,7 +109,7 @@ edit('osfmk/arm/pmap/pmap.h',
 edit('osfmk/arm64/genassym.c', 'DECLARE("PGBYTES", ARM_PGBYTES);',
      'DECLARE("PGBYTES", ARM_PGBYTES);\n\tDECLARE("BOOTSTRAP_TABLE_BYTES", BOOTSTRAP_TABLE_SIZE);')
 p = source / 'osfmk/arm64/start.s'
-s = p.read_text()
+s = p.read_text(encoding='utf-8')
 s, n = re.subn(r'\tmov\s+x2, #\(TTE_PGENTRIES\)[^\n]*\n\tlsl\s+x2, x2, #2[^\n]*',
     '\tmov x2, #(BOOTSTRAP_TABLE_BYTES / ARM_PGBYTES)\n\tlsl x2, x2, #(ARM_PGSHIFT - TTE_SHIFT)', s)
 if n != 1:
