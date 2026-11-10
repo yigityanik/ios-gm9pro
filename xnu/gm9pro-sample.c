@@ -40,7 +40,7 @@ gm9_sample_thread(__unused void *arg, __unused wait_result_t result)
     static int channel;
     unsigned samples = 0;
     /* One hour maximum including the initial shared-cache scan. */
-    for (unsigned poll = 0; poll < 240 && samples < 6; poll++) {
+    for (unsigned poll = 0; poll < 240 && samples < 16; poll++) {
         (void)tsleep(&channel, PZERO, "gm9wait", 15 * hz);
         bool found = false;
         printf("GM9 WAIT snapshot=%u poll=%u\n", samples + 1, poll);
