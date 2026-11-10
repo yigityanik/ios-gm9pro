@@ -55,6 +55,9 @@ fi
 if [[ "${GM9PRO_QUIET_FB:-0}" == 1 ]]; then
     cmdline+=" sweetfb_noconsole=1"
 fi
+if [[ "${GM9PRO_BOOT_SAMPLES:-0}" == 1 ]]; then
+    cmdline+=" gm9sample=1"
+fi
 cmdline=${cmdline/cpus=1/cpus=$cpus}
 if [[ "${GM9PRO_KERNEL_4K:-0}" == 1 ]]; then
     # The macOS default reserves 16x RAM for the compressor. That exceeds
