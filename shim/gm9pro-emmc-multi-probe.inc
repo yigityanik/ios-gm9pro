@@ -1,6 +1,10 @@
+#define GM9_READ_MAX_BLOCKS 2048U
 #include "gm9pro-emmc-multi.inc"
-static uint8_t multi_data[GM9_READ_MAX_BLOCKS * 512];
-static uint8_t single_data[GM9_READ_MAX_BLOCKS * 512];
+/* Filled before comparison; reserve after the small entry stacks so the
+ * entry's PC-relative stack/BSS references stay within their ADR range.
+ */
+static uint8_t multi_data[GM9_READ_MAX_BLOCKS * 512] __attribute__((section(".probe_buffers")));
+static uint8_t single_data[GM9_READ_MAX_BLOCKS * 512] __attribute__((section(".probe_buffers")));
 static void
 multi_probe(void)
 {
@@ -23,9 +27,9 @@ multi_probe(void)
     for (unsigned i = 16; i < 20; i++) header[i] = 0;
     if (crc32(header, bytes) != expected) goto fail;
     const uint32_t locations[] = { 0, 4096, sectors / 2 };
-    const unsigned sizes[] = { 2, 8, 128 };
+    const unsigned sizes[] = { 2, 8, 128, 512, 2048 };
     for (unsigned site = 0; site < 3; site++) {
-        for (unsigned size = 0; size < 3; size++) {
+        for (unsigned size = 0; size < sizeof(sizes) / sizeof(sizes[0]); size++) {
             unsigned blocks = sizes[size];
             uint32_t lba = locations[site];
             if (blocks > sectors - lba) goto fail;
@@ -57,7 +61,7 @@ multi_probe(void)
         }
     }
     multi_quiet = 0;
-    puts_uart("EMMC MULTI PASS: 9 comparisons + repeat reads; no sector written\n");
+    puts_uart("EMMC MULTI PASS: 15 comparisons through 1 MiB + repeat reads; no sector written\n");
     return;
 fail:
     multi_quiet = 0;

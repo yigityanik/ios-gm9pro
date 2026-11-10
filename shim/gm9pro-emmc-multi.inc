@@ -2,7 +2,12 @@
  * Caller owns the controller and keeps the inherited card/bus configuration.
  * No DMA mapping, partition selection, card switch or persistent write.
  */
+#ifndef GM9_READ_MAX_BLOCKS
 #define GM9_READ_MAX_BLOCKS 128U
+#endif
+#if GM9_READ_MAX_BLOCKS < 2 || GM9_READ_MAX_BLOCKS > 65535
+#error Invalid SDHCI block-count limit
+#endif
 static int
 gm9_read_blocks(uint32_t lba, unsigned blocks, uint8_t *out)
 {
