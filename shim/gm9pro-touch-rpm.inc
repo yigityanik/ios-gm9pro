@@ -4,7 +4,9 @@
  */
 #include <stdbool.h>
 #include <stddef.h>
+#ifndef MIN
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
+#endif
 static void tg_delay_us(unsigned us)
 {
     uint64_t end = ticks() + (freq() * us + 999999) / 1000000;

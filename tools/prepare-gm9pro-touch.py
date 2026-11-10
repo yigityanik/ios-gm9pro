@@ -40,7 +40,6 @@ static void hex(const char *s, uint64_t v) { printf("%s=0x%llx\n", s, (unsigned 
 '''
 
 rpm = (repo / 'shim/gm9pro-touch-rpm.inc').read_text()
-rpm = rpm.replace('uintptr_t ram = ml_io_map', 'uintptr_t ram = ml_io_map')
 rpm = rpm.replace('uintptr_t ram = RPM_MSGRAM_PA;',
                   'uintptr_t ram = gm9_va(RPM_MSGRAM_PA);')
 rpm = rpm.replace('rpm.ipc = RPM_IPC_PA;', 'rpm.ipc = gm9_va(RPM_IPC_PA);')
